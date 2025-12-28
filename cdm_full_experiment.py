@@ -1,5 +1,5 @@
-# cdm_full_experiment.py
-import gym
+# cdm_full_experiment.py - FIXED FOR WINDOWS
+import gymnasium as gym  # Changed from "import gym"
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -7,9 +7,19 @@ import numpy as np
 import matplotlib.pyplot as plt
 from collections import deque
 import time
+import sys
+import os
+
+# Try to import pybullet for Windows compatibility
+try:
+    import pybullet_envs
+    PYBULLET_AVAILABLE = True
+except ImportError:
+    PYBULLET_AVAILABLE = False
+    print("Note: PyBullet not installed. Using standard gym environments if available.")
 
 # ============================
-# 1. CDM COMPONENTS
+# 1. CDM COMPONENTS (NO CHANGES NEEDED HERE)
 # ============================
 
 class CDM_Metric(nn.Module):
@@ -77,7 +87,7 @@ class GaussianPolicy(nn.Module):
         return action, log_prob, mu, std
 
 # ============================
-# 2. CONTRACTION LOSS
+# 2. CONTRACTION LOSS (NO CHANGES)
 # ============================
 
 def compute_jacobian(model, s, a):
@@ -85,7 +95,6 @@ def compute_jacobian(model, s, a):
     s.requires_grad_(True)
     s_next = model(s, a)
     
-    # Use efficient Jacobian computation
     s_dim = s_next.shape[1]
     jacobian = []
     
@@ -108,22 +117,19 @@ def get_contraction_loss(s, a, model, metric, contraction_rate=0.1, lambda_reg=1
     M_curr = metric(s)
     M_next = metric(s_next)
     
-    # Compute contraction condition
-    M_next_detached = M_next.detach()  # Detach metric at next state for stability
+    M_next_detached = M_next.detach()
     stability_term = torch.bmm(torch.bmm(A.transpose(1, 2), M_next_detached), A)
     contraction_cond = stability_term - (1 - contraction_rate) * M_curr
     
-    # Frobenius norm of positive part + regularization
     pos_cond = torch.relu(contraction_cond)
     loss_frob = torch.norm(pos_cond, p='fro', dim=(1, 2)).mean()
     
-    # Regularization to prevent metric from blowing up
     M_norm = torch.norm(M_curr, p='fro', dim=(1, 2)).mean()
     
     return loss_frob + lambda_reg * M_norm, loss_frob.item()
 
 # ============================
-# 3. REPLAY BUFFER
+# 3. REPLAY BUFFER (NO CHANGES)
 # ============================
 
 class ReplayBuffer:
@@ -152,24 +158,30 @@ class ReplayBuffer:
         return len(self.buffer)
 
 # ============================
-# 4. TRAINING LOOP
+# 4. TRAINING LOOP (NO CHANGES NEEDED)
 # ============================
 
 def train_cdm(env_name="HalfCheetah-v4", episodes=200, max_steps=1000, 
               batch_size=256, buffer_size=100000, save_freq=50):
     
-    env = gym.make(env_name)
-    s_dim, a_dim = env.observation_space.shape[0], env.action_space.shape[0]
+    # Make environment
+    env = gym.make(env_name, render_mode=None)  # Added render_mode for gymnasium
+    
+    s_dim = env.observation_space.shape[0]
+    a_dim = env.action_space.shape[0]
     
     print(f"Environment: {env_name}")
     print(f"State dimension: {s_dim}, Action dimension: {a_dim}")
     
     # Initialize models
-    policy = GaussianPolicy(s_dim, a_dim)
-    model = DynamicsModel(s_dim, a_dim)
-    metric = CDM_Metric(s_dim)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
     
-    # Separate optimizers for better training stability
+    policy = GaussianPolicy(s_dim, a_dim).to(device)
+    model = DynamicsModel(s_dim, a_dim).to(device)
+    metric = CDM_Metric(s_dim).to(device)
+    
+    # Separate optimizers
     policy_optimizer = optim.Adam(policy.parameters(), lr=3e-4)
     model_optimizer = optim.Adam(model.parameters(), lr=3e-4)
     metric_optimizer = optim.Adam(metric.parameters(), lr=3e-4)
@@ -183,41 +195,35 @@ def train_cdm(env_name="HalfCheetah-v4", episodes=200, max_steps=1000,
     avg_rewards = deque(maxlen=10)
     
     # Scale action perturbation
-    action_noise_std = 1.0
+    action_noise_std = 0.5  # Reduced from 1.0 for stability
     noise_decay = 0.995
     
     for ep in range(episodes):
-        state = env.reset()
-        if isinstance(state, tuple):  # Handle new gym API
-            state = state[0]
-        
+        state, _ = env.reset()  # gymnasium returns (state, info)
         ep_reward = 0
         ep_contr_loss = 0
         step_count = 0
         
         for t in range(max_steps):
             # Prepare state tensor
-            s_tensor = torch.FloatTensor(state).unsqueeze(0)
+            s_tensor = torch.FloatTensor(state).unsqueeze(0).to(device)
             
             # Get action from policy
             with torch.no_grad():
                 action_tensor, _, mu, std = policy.sample(s_tensor)
-                action = action_tensor.numpy()[0]
+                action = action_tensor.cpu().numpy()[0]
             
             # Add exploration noise with decay
-            if t % 50 == 0:  # Stronger perturbation every 50 steps
+            if t % 50 == 0:
                 noise = np.random.normal(0, action_noise_std, size=a_dim)
                 action = action + noise
             
+            # Clip action
             action = np.clip(action, env.action_space.low, env.action_space.high)
             
             # Take action in environment
-            result = env.step(action)
-            if len(result) == 4:  # Old gym API
-                next_state, reward, done, _ = result
-            else:  # New gym API
-                next_state, reward, done, truncated, _ = result
-                done = done or truncated
+            next_state, reward, terminated, truncated, _ = env.step(action)
+            done = terminated or truncated
             
             # Store transition
             replay_buffer.push(state, action, reward, next_state, done)
@@ -226,6 +232,9 @@ def train_cdm(env_name="HalfCheetah-v4", episodes=200, max_steps=1000,
             if len(replay_buffer) >= batch_size:
                 # Sample batch
                 s_batch, a_batch, r_batch, s_next_batch, d_batch = replay_buffer.sample(batch_size)
+                s_batch = s_batch.to(device)
+                a_batch = a_batch.to(device)
+                s_next_batch = s_next_batch.to(device)
                 
                 # Update dynamics model
                 model_optimizer.zero_grad()
@@ -240,12 +249,11 @@ def train_cdm(env_name="HalfCheetah-v4", episodes=200, max_steps=1000,
                 contr_loss.backward()
                 metric_optimizer.step()
                 
-                # Update policy with reinforcement learning
+                # Update policy
                 policy_optimizer.zero_grad()
                 action_pred, log_prob, _, _ = policy.sample(s_batch)
-                # Simple policy gradient with advantage (reward-to-go)
                 with torch.no_grad():
-                    advantage = r_batch
+                    advantage = r_batch.to(device)
                 policy_loss = -(log_prob * advantage).mean()
                 policy_loss.backward()
                 policy_optimizer.step()
@@ -289,6 +297,8 @@ def train_cdm(env_name="HalfCheetah-v4", episodes=200, max_steps=1000,
     torch.save(model.state_dict(), "cdm_dynamics_final.pth")
     torch.save(metric.state_dict(), "cdm_metric_final.pth")
     
+    env.close()
+    
     # Visualization
     plt.figure(figsize=(15, 5))
     
@@ -324,16 +334,18 @@ def train_cdm(env_name="HalfCheetah-v4", episodes=200, max_steps=1000,
     return rewards_history, contraction_history
 
 # ============================
-# 5. TESTING FUNCTION
+# 5. TESTING FUNCTION (UPDATED)
 # ============================
 
-def test_policy(env_name="HalfCheetah-v4", model_path="cdm_policy_final.pth", episodes=10):
+def test_policy(env_name="HalfCheetah-v4", model_path="cdm_policy_final.pth", episodes=5):
     """Test the trained policy"""
-    env = gym.make(env_name)
-    s_dim, a_dim = env.observation_space.shape[0], env.action_space.shape[0]
+    env = gym.make(env_name, render_mode="human")  # Show visualization
+    
+    s_dim = env.observation_space.shape[0]
+    a_dim = env.action_space.shape[0]
     
     policy = GaussianPolicy(s_dim, a_dim)
-    policy.load_state_dict(torch.load(model_path))
+    policy.load_state_dict(torch.load(model_path, map_location='cpu'))
     policy.eval()
     
     print(f"\nTesting policy: {model_path}")
@@ -341,10 +353,7 @@ def test_policy(env_name="HalfCheetah-v4", model_path="cdm_policy_final.pth", ep
     test_rewards = []
     
     for ep in range(episodes):
-        state = env.reset()
-        if isinstance(state, tuple):
-            state = state[0]
-        
+        state, _ = env.reset()
         ep_reward = 0
         done = False
         
@@ -353,12 +362,8 @@ def test_policy(env_name="HalfCheetah-v4", model_path="cdm_policy_final.pth", ep
             with torch.no_grad():
                 action, _, _, _ = policy.sample(s_tensor)
             
-            result = env.step(action.numpy()[0])
-            if len(result) == 4:
-                next_state, reward, done, _ = result
-            else:
-                next_state, reward, done, truncated, _ = result
-                done = done or truncated
+            next_state, reward, terminated, truncated, _ = env.step(action.numpy()[0])
+            done = terminated or truncated
             
             state = next_state
             ep_reward += reward
@@ -372,29 +377,55 @@ def test_policy(env_name="HalfCheetah-v4", model_path="cdm_policy_final.pth", ep
     return test_rewards
 
 # ============================
-# 6. RUN
+# 6. RUN - UPDATED FOR WINDOWS
 # ============================
 
 if __name__ == "__main__":
-    # Training
     print("=" * 60)
+    print("CDM Framework - Contraction Dynamics Model")
+    print("=" * 60)
+    
+    # Choose environment based on availability
+    if PYBULLET_AVAILABLE:
+        print("PyBullet detected. Using PyBullet HalfCheetah environment.")
+        env_name = "HalfCheetahBulletEnv-v0"
+    else:
+        print("PyBullet not available. Trying standard gym environments.")
+        try:
+            # Test if standard HalfCheetah is available
+            import gymnasium as gym
+            env = gym.make("HalfCheetah-v4", render_mode=None)
+            env.close()
+            env_name = "HalfCheetah-v4"
+            print("Standard HalfCheetah environment available.")
+        except:
+            print("No suitable environments found.")
+            print("Please install PyBullet: pip install pybullet")
+            sys.exit(1)
+    
+    # Training
+    print("\n" + "=" * 60)
     print("Training CDM Agent")
     print("=" * 60)
     
     start_time = time.time()
+    
+    # Start with small training for testing
     rewards, contraction = train_cdm(
-        env_name="HalfCheetah-v4",
-        episodes=200,  # Can increase for better performance
-        max_steps=1000,
-        batch_size=256
+        env_name=env_name,
+        episodes=50,  # Start small for testing
+        max_steps=500,  # Shorter episodes for testing
+        batch_size=64,  # Smaller batch size
+        buffer_size=50000,
+        save_freq=10
     )
     
     training_time = time.time() - start_time
-    print(f"\nTotal training time: {training_time/60:.1f} minutes")
+    print(f"\nTraining completed in {training_time/60:.1f} minutes")
     
     # Testing
     print("\n" + "=" * 60)
     print("Testing Trained Policy")
     print("=" * 60)
     
-    test_rewards = test_policy(episodes=5)
+    test_rewards = test_policy(env_name=env_name, episodes=3)

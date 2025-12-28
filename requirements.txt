@@ -1,0 +1,24 @@
+# Core dependencies
+gymnasium>=0.28.1
+torch>=2.0.0
+numpy>=1.21.0
+matplotlib>=3.5.0
+
+# For HalfCheetah/MuJoCo environments
+mujoco>=2.3.3
+mujoco-py>=2.1.2.14
+
+# For other optional environments
+box2d-py>=2.3.5
+pybullet>=3.2.5
+
+# Utilities
+tqdm>=4.64.0
+wandb>=0.13.0  # Optional: for experiment tracking
+seaborn>=0.11.0  # Optional: for better visualizations
+pandas>=1.4.0  # Optional: for data analysis
+
+# Development dependencies
+black>=22.0.0  # Code formatting
+flake8>=4.0.0  # Linting
+pytest>=7.0.0  # Testing

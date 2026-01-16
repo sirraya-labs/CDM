@@ -1,5 +1,5 @@
 
-```markdown
+```
 # 🔷 Robust Contraction Dynamics Model (R-CDM)
 
 **Learning Contraction Metrics for Provably Stable Model-Based Reinforcement Learning**  

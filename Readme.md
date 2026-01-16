@@ -1,6 +1,6 @@
 
 ``
-# 🔷 Robust Contraction Dynamics Model (R-CDM)
+# 🔷  Contraction Dynamics Model (R-CDM)
 
 **Learning Contraction Metrics for Provably Stable Model-Based Reinforcement Learning**  
 *Mathematically-Guaranteed Stable Robot Control through Learned Riemannian Metrics*
@@ -12,7 +12,7 @@
 
 ## 📖 Overview
 
-**Robust Contraction Dynamics Model (R-CDM)** is a novel model-based reinforcement learning framework that learns *contraction metrics*—Riemannian metrics that ensure exponential convergence of system trajectories—alongside dynamics models and control policies. Unlike traditional RL methods that only optimize for reward, R-CDM provides **mathematical stability guarantees** while maintaining competitive performance, making it ideal for safety-critical applications like robotics and autonomous systems.
+** Contraction Dynamics Model (R-CDM)** is a novel model-based reinforcement learning framework that learns *contraction metrics*—Riemannian metrics that ensure exponential convergence of system trajectories—alongside dynamics models and control policies. Unlike traditional RL methods that only optimize for reward, R-CDM provides **mathematical stability guarantees** while maintaining competitive performance, making it ideal for safety-critical applications like robotics and autonomous systems.
 
 Developed by **Amir Hameed** at **Sirraya Labs**, this implementation bridges contraction theory with deep learning to produce controllers that are both capable and reliable.
 
@@ -21,7 +21,7 @@ Developed by **Amir Hameed** at **Sirraya Labs**, this implementation bridges co
 - **🔒 Provable Stability Guarantees**: Enforces contraction conditions that ensure exponential convergence of trajectories
 - **📐 Learned Riemannian Metrics**: Adaptively learns state-dependent distance metrics \( M(x) = L(x)L(x)^T + εI \)
 - **🎯 Adaptive Stability-Performance Tradeoff**: Learns to balance stability requirements with reward maximization
-- **🤖 Robust Ensemble Dynamics**: Combines contraction theory with deep ensembles for uncertainty-aware planning
+- **🤖  Ensemble Dynamics**: Combines contraction theory with deep ensembles for uncertainty-aware planning
 - **📊 Comprehensive Ablation Studies**: Systematically evaluates each component's contribution
 - **⚡ Production-Ready Implementation**: Complete with error handling, logging, and visualization
 
@@ -80,7 +80,7 @@ CDM/
 └── README.md                    # This documentation
 
 # Generated directories (created during runtime):
-├── cdm_robust_results/          # Single experiment results
+├── cdm__results/          # Single experiment results
 │   ├── config.json              # Training configuration
 │   ├── training_results.png     # Comprehensive plots
 │   ├── *.pth                    # Trained models
@@ -104,7 +104,7 @@ CDM/
 
 ### 1. **Dynamics Ensemble** (`DynamicsEnsemble`)
 ```python
-# Ensemble of 7 neural networks for robust uncertainty estimation
+# Ensemble of 7 neural networks for  uncertainty estimation
 self.dynamics = DynamicsEnsemble(
     state_dim=STATE_DIM,
     action_dim=ACTION_DIM,
@@ -113,10 +113,10 @@ self.dynamics = DynamicsEnsemble(
 )
 ```
 
-### 2. **Contraction Metric** (`RobustContractionMetric`)
+### 2. **Contraction Metric** (`ContractionMetric`)
 ```python
 # Learns Riemannian metric M(x) = L(x)L(x)^T + εI
-self.metric_net = RobustContractionMetric(
+self.metric_net = ContractionMetric(
     state_dim=STATE_DIM,
     hidden_dim=128,
     epsilon=0.05
@@ -213,7 +213,7 @@ else:
 
 ### 2. **Importance of Ensemble**
 - Single dynamics model fails in 65% of trials due to numerical instability
-- Ensembles provide necessary diversity for robust contraction learning
+- Ensembles provide necessary diversity for  contraction learning
 
 ### 3. **Metric Learning Matters**
 - Learned metrics outperform fixed identity metrics by 34%
@@ -249,7 +249,7 @@ config = Config(
 )
 
 # Initialize agent
-agent = RobustContractionDynamicsAgent(config)
+agent = ContractionDynamicsAgent(config)
 
 # Train
 agent.train(env, eval_env)
@@ -264,7 +264,7 @@ results = {}
 
 for beta in beta_values:
     config = Config(INITIAL_BETA=beta, BETA_MAX=beta*2)
-    agent = RobustContractionDynamicsAgent(config)
+    agent = ContractionDynamicsAgent(config)
     results[beta] = agent.train(env, eval_env)
 ```
 
@@ -278,7 +278,7 @@ all_results = []
 for seed in seeds:
     set_seed(seed)
     config = Config(SEED=seed)
-    agent = RobustContractionDynamicsAgent(config)
+    agent = ContractionDynamicsAgent(config)
     results = agent.train(env, eval_env)
     all_results.append(results)
 ```

@@ -1,6 +1,6 @@
 
 ``
-# 🔷  Contraction Dynamics Model (R-CDM)
+# Contraction Dynamics Model (R-CDM)
 
 **Learning Contraction Metrics for Provably Stable Model-Based Reinforcement Learning**  
 *Mathematically-Guaranteed Stable Robot Control through Learned Riemannian Metrics*
@@ -12,7 +12,7 @@
 
 ## 📖 Overview
 
-** Contraction Dynamics Model (R-CDM)** is a novel model-based reinforcement learning framework that learns *contraction metrics*—Riemannian metrics that ensure exponential convergence of system trajectories—alongside dynamics models and control policies. Unlike traditional RL methods that only optimize for reward, R-CDM provides **mathematical stability guarantees** while maintaining competitive performance, making it ideal for safety-critical applications like robotics and autonomous systems.
+Contraction Dynamics Model (R-CDM) is a novel model-based reinforcement learning framework that learns *contraction metrics*—Riemannian metrics that ensure exponential convergence of system trajectories—alongside dynamics models and control policies. Unlike traditional RL methods that only optimize for reward, R-CDM provides **mathematical stability guarantees** while maintaining competitive performance, making it ideal for safety-critical applications like robotics and autonomous systems.
 
 Developed by **Amir Hameed** at **Sirraya Labs**, this implementation bridges contraction theory with deep learning to produce controllers that are both capable and reliable.
 

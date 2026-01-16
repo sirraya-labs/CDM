@@ -1,4 +1,3 @@
-Here's the updated README.md that accurately reflects your actual code structure and provides proper documentation:
 
 ```markdown
 # 🔷 Robust Contraction Dynamics Model (R-CDM)

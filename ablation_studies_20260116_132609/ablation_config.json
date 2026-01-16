@@ -1,0 +1,109 @@
+{
+  "ablation_variants": {
+    "full_cdm": {
+      "name": "Full CDM",
+      "description": "Complete implementation with all features",
+      "config_modifications": {}
+    },
+    "no_contraction": {
+      "name": "No Contraction",
+      "description": "\u03b2=0, no stability regularization",
+      "config_modifications": {
+        "INITIAL_BETA": 0.0,
+        "BETA_MIN": 0.0,
+        "BETA_MAX": 0.0
+      }
+    },
+    "fixed_metric": {
+      "name": "Fixed Metric",
+      "description": "M(x) = I (identity metric)",
+      "config_modifications": {},
+      "special_case": "fixed_metric"
+    },
+    "no_cholesky": {
+      "name": "No Cholesky",
+      "description": "Direct metric prediction without Cholesky",
+      "config_modifications": {},
+      "special_case": "no_cholesky"
+    },
+    "single_dynamics": {
+      "name": "Single Dynamics",
+      "description": "No ensemble (K=1)",
+      "config_modifications": {
+        "ENSEMBLE_SIZE": 1
+      }
+    },
+    "no_ensemble": {
+      "name": "No Ensemble Weighting",
+      "description": "Equal ensemble weights",
+      "config_modifications": {},
+      "special_case": "no_ensemble_weights"
+    },
+    "no_adaptive_beta": {
+      "name": "Fixed \u03b2",
+      "description": "No adaptive \u03b2 adjustment",
+      "config_modifications": {
+        "BETA_DECAY": 1.0,
+        "BETA_INCREASE": 1.0
+      }
+    },
+    "no_metric_reg": {
+      "name": "No Metric Reg",
+      "description": "No metric regularization",
+      "config_modifications": {
+        "METRIC_REGULARIZATION": 0.0
+      }
+    },
+    "alpha_0_9": {
+      "name": "\u03b1=0.9",
+      "description": "Faster contraction",
+      "config_modifications": {
+        "CONTRACTION_RATE_ALPHA": 0.9
+      }
+    },
+    "alpha_0_97": {
+      "name": "\u03b1=0.97",
+      "description": "Slower contraction",
+      "config_modifications": {
+        "CONTRACTION_RATE_ALPHA": 0.97
+      }
+    },
+    "no_exploration": {
+      "name": "No Exploration",
+      "description": "Deterministic policy only",
+      "config_modifications": {
+        "MIN_NOISE": 0.0,
+        "NOISE_DECAY": 1.0
+      }
+    },
+    "relu_activation": {
+      "name": "ReLU Activation",
+      "description": "ReLU instead of softplus for Cholesky",
+      "config_modifications": {},
+      "special_case": "relu_activation"
+    },
+    "exp_activation": {
+      "name": "Exp Activation",
+      "description": "Exp instead of softplus for Cholesky",
+      "config_modifications": {},
+      "special_case": "exp_activation"
+    }
+  },
+  "num_seeds": 3,
+  "seeds": [
+    42,
+    123,
+    456,
+    789,
+    1337
+  ],
+  "num_episodes": 200,
+  "eval_interval": 20,
+  "num_eval_episodes": 3,
+  "save_dir": "ablation_studies_20260116_132609",
+  "generate_plots": true,
+  "save_metrics": true,
+  "wandb_enabled": false,
+  "confidence_level": 0.95,
+  "pairwise_comparisons": true
+}

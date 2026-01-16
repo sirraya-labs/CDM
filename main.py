@@ -46,7 +46,7 @@ class Config:
     CRITIC_HIDDEN_DIM: int = 256
     
     # Training Parameters (optimized)
-    TOTAL_EPISODES: int = 500
+    TOTAL_EPISODES: int = 50
     BATCH_SIZE: int = 256
     GAMMA: float = 0.99
     TAU: float = 0.005
@@ -91,6 +91,7 @@ class Config:
     LOG_INTERVAL: int = 5
     EVAL_INTERVAL: int = 20
     EVAL_EPISODES: int = 5
+    PLOT_RESULTS: bool = True
     
     # Early Stopping
     EARLY_STOP_REWARD: float = -300.0
@@ -1467,118 +1468,256 @@ class RobustContractionDynamicsAgent:
             json.dump(serializable_metrics, f, indent=2, default=str)
     
     def plot_training_results(self):
-        """Plot comprehensive training results"""
-        fig, axes = plt.subplots(3, 3, figsize=(18, 15))
-        
-        episodes = range(len(self.metrics['episode_rewards']))
-        
-        # 1. Training and Evaluation Rewards
-        axes[0, 0].plot(episodes, self.metrics['episode_rewards'], 'b-', alpha=0.7, label='Training')
-        if self.metrics['eval_rewards']:
-            eval_x = np.arange(0, len(self.metrics['episode_rewards']), self.config.EVAL_INTERVAL)[:len(self.metrics['eval_rewards'])]
-            axes[0, 0].plot(eval_x, self.metrics['eval_rewards'], 'r-', alpha=0.9, label='Evaluation', linewidth=2)
-        axes[0, 0].set_xlabel('Episode')
-        axes[0, 0].set_ylabel('Reward')
-        axes[0, 0].set_title('Training Progress')
-        axes[0, 0].legend()
-        axes[0, 0].grid(True, alpha=0.3)
-        
-        # 2. Loss Curves
-        if self.metrics.get('dynamics_losses'):
-            loss_steps = range(len(self.metrics['dynamics_losses']))
-            axes[0, 1].plot(loss_steps, self.metrics['dynamics_losses'], 'b-', label='Dynamics', alpha=0.7)
-            if self.metrics.get('metric_losses'):
-                axes[0, 1].plot(loss_steps[:len(self.metrics['metric_losses'])], 
-                               self.metrics['metric_losses'], 'g-', label='Metric', alpha=0.7)
-            if self.metrics.get('critic_losses'):
-                axes[0, 1].plot(loss_steps[:len(self.metrics['critic_losses'])], 
-                               self.metrics['critic_losses'], 'r-', label='Critic', alpha=0.7)
-            if self.metrics.get('actor_losses'):
-                axes[0, 1].plot(loss_steps[:len(self.metrics['actor_losses'])], 
-                               self.metrics['actor_losses'], 'm-', label='Actor', alpha=0.7)
-            axes[0, 1].set_xlabel('Training Step')
-            axes[0, 1].set_ylabel('Loss')
-            axes[0, 1].set_title('Training Losses')
-            axes[0, 1].legend()
-            axes[0, 1].grid(True, alpha=0.3)
-            axes[0, 1].set_yscale('log')
-        
-        # 3. Beta Adaptation
-        axes[0, 2].plot(self.metrics['betas'], 'r-', alpha=0.7)
-        axes[0, 2].set_xlabel('Episode')
-        axes[0, 2].set_ylabel('β')
-        axes[0, 2].set_title('Stability Weight Adaptation')
-        axes[0, 2].grid(True, alpha=0.3)
-        
-        # 4. Exploration Rate
-        axes[1, 0].plot(self.metrics['exploration_rates'], 'g-', alpha=0.7)
-        axes[1, 0].set_xlabel('Episode')
-        axes[1, 0].set_ylabel('Exploration Rate')
-        axes[1, 0].set_title('Exploration Schedule')
-        axes[1, 0].grid(True, alpha=0.3)
-        
-        # 5. Energy Levels
-        if self.metrics.get('energies'):
-            axes[1, 1].plot(self.metrics['energies'], 'purple', alpha=0.7)
-            axes[1, 1].set_xlabel('Training Step')
-            axes[1, 1].set_ylabel('Energy')
-            axes[1, 1].set_title('Metric Energy')
-            axes[1, 1].grid(True, alpha=0.3)
-        
-        # 6. Reward Distribution
-        axes[1, 2].hist(self.metrics['episode_rewards'], bins=30, alpha=0.7, 
-                       color='blue', edgecolor='black')
-        axes[1, 2].set_xlabel('Reward')
-        axes[1, 2].set_ylabel('Frequency')
-        axes[1, 2].set_title('Reward Distribution')
-        axes[1, 2].grid(True, alpha=0.3)
-        
-        # 7. Moving Average Rewards
-        if len(self.metrics['episode_rewards']) >= 20:
-            window = 20
-            moving_avg = np.convolve(self.metrics['episode_rewards'], 
-                                    np.ones(window)/window, mode='valid')
-            axes[2, 0].plot(range(window-1, len(self.metrics['episode_rewards'])), 
-                          moving_avg, 'orange', linewidth=2)
-            axes[2, 0].set_xlabel('Episode')
-            axes[2, 0].set_ylabel(f'Reward ({window}-ep MA)')
-            axes[2, 0].set_title('Moving Average Performance')
-            axes[2, 0].grid(True, alpha=0.3)
-        
-        # 8. Success Rate
-        if len(self.metrics['episode_rewards']) >= 20:
-            window = 20
-            success_rates = []
-            for i in range(len(self.metrics['episode_rewards']) - window + 1):
-                window_rewards = self.metrics['episode_rewards'][i:i+window]
-                successes = sum(1 for r in window_rewards if r > -500)
-                success_rates.append(successes / window * 100)
+        """Plot comprehensive training results with robust error handling"""
+        try:
+            # Create figure with subplots
+            fig, axes = plt.subplots(3, 3, figsize=(18, 15))
             
-            axes[2, 1].plot(range(window-1, len(self.metrics['episode_rewards'])), 
-                          success_rates, 'g-', linewidth=2)
-            axes[2, 1].set_xlabel('Episode')
-            axes[2, 1].set_ylabel('Success Rate (%)')
-            axes[2, 1].set_title(f'Success Rate (> -500)')
-            axes[2, 1].grid(True, alpha=0.3)
-            axes[2, 1].set_ylim([0, 100])
-        
-        # 9. Beta vs Reward
-        if len(self.metrics['episode_rewards']) == len(self.metrics['betas']):
-            scatter = axes[2, 2].scatter(self.metrics['betas'], 
-                                       self.metrics['episode_rewards'],
-                                       c=range(len(self.metrics['episode_rewards'])),
-                                       cmap='viridis', alpha=0.6, s=20)
-            axes[2, 2].set_xlabel('β (Stability Weight)')
-            axes[2, 2].set_ylabel('Reward')
-            axes[2, 2].set_title('Stability-Performance Tradeoff')
-            axes[2, 2].grid(True, alpha=0.3)
-            plt.colorbar(scatter, ax=axes[2, 2], label='Episode')
-        
-        plt.suptitle('Robust CDM: Riemannian Metric Learning Results', fontsize=16)
-        plt.tight_layout()
-        plt.savefig(self.save_dir / "training_results.png", dpi=150, bbox_inches='tight')
-        plt.show()
-
+            # Flatten axes for easier iteration
+            ax_flat = axes.flatten()
+            
+            # Episode indices for training rewards
+            if self.metrics.get('episode_rewards'):
+                episodes = range(len(self.metrics['episode_rewards']))
+                
+                # 1. Training and Evaluation Rewards - FIXED
+                ax = axes[0, 0]
+                ax.plot(episodes, self.metrics['episode_rewards'], 'b-', alpha=0.7, label='Training')
+                
+                # Fix eval plotting with proper alignment
+                if self.metrics.get('eval_rewards') and len(self.metrics['eval_rewards']) > 0:
+                    # Ensure eval data aligns with eval intervals
+                    eval_x = np.arange(0, len(episodes), self.config.EVAL_INTERVAL)
+                    # Trim eval_x to match eval_rewards length
+                    eval_x = eval_x[:len(self.metrics['eval_rewards'])]
+                    # Ensure they have same length
+                    min_len = min(len(eval_x), len(self.metrics['eval_rewards']))
+                    if min_len > 0:
+                        ax.plot(eval_x[:min_len], self.metrics['eval_rewards'][:min_len], 
+                            'r-', alpha=0.9, label='Evaluation', linewidth=2)
+                
+                ax.set_xlabel('Episode')
+                ax.set_ylabel('Reward')
+                ax.set_title('Training Progress')
+                ax.legend()
+                ax.grid(True, alpha=0.3)
+            
+            # 2. Loss Curves - FIXED
+            ax = axes[0, 1]
+            loss_data_exists = False
+            
+            if self.metrics.get('dynamics_losses') and len(self.metrics['dynamics_losses']) > 0:
+                loss_steps = range(len(self.metrics['dynamics_losses']))
+                ax.plot(loss_steps, self.metrics['dynamics_losses'], 'b-', label='Dynamics', alpha=0.7)
+                loss_data_exists = True
+                
+            if self.metrics.get('metric_losses') and len(self.metrics['metric_losses']) > 0:
+                min_len = min(len(loss_steps), len(self.metrics['metric_losses'])) if 'loss_steps' in locals() else len(self.metrics['metric_losses'])
+                if min_len > 0:
+                    ax.plot(range(min_len), self.metrics['metric_losses'][:min_len], 
+                        'g-', label='Metric', alpha=0.7)
+                    loss_data_exists = True
+                    
+            if self.metrics.get('critic_losses') and len(self.metrics['critic_losses']) > 0:
+                min_len = min(len(loss_steps), len(self.metrics['critic_losses'])) if 'loss_steps' in locals() else len(self.metrics['critic_losses'])
+                if min_len > 0:
+                    ax.plot(range(min_len), self.metrics['critic_losses'][:min_len], 
+                        'r-', label='Critic', alpha=0.7)
+                    loss_data_exists = True
+                    
+            if self.metrics.get('actor_losses') and len(self.metrics['actor_losses']) > 0:
+                min_len = min(len(loss_steps), len(self.metrics['actor_losses'])) if 'loss_steps' in locals() else len(self.metrics['actor_losses'])
+                if min_len > 0:
+                    ax.plot(range(min_len), self.metrics['actor_losses'][:min_len], 
+                        'm-', label='Actor', alpha=0.7)
+                    loss_data_exists = True
+            
+            if loss_data_exists:
+                ax.set_xlabel('Training Step')
+                ax.set_ylabel('Loss')
+                ax.set_title('Training Losses')
+                ax.legend()
+                ax.grid(True, alpha=0.3)
+                ax.set_yscale('log')
+            else:
+                ax.text(0.5, 0.5, 'No loss data available', 
+                    ha='center', va='center', transform=ax.transAxes)
+                ax.set_title('Training Losses')
+            
+            # 3. Beta Adaptation - FIXED
+            ax = axes[0, 2]
+            if self.metrics.get('betas') and len(self.metrics['betas']) > 0:
+                # Ensure x and y have same length
+                x_range = range(len(self.metrics['betas']))
+                ax.plot(x_range, self.metrics['betas'], 'r-', alpha=0.7)
+                ax.set_xlabel('Episode' if len(x_range) <= len(episodes) else 'Training Step')
+                ax.set_ylabel('β')
+                ax.set_title('Stability Weight Adaptation')
+                ax.grid(True, alpha=0.3)
+            else:
+                ax.text(0.5, 0.5, 'No beta data available', 
+                    ha='center', va='center', transform=ax.transAxes)
+                ax.set_title('Stability Weight Adaptation')
+            
+            # 4. Exploration Rate - FIXED
+            ax = axes[1, 0]
+            if self.metrics.get('exploration_rates') and len(self.metrics['exploration_rates']) > 0:
+                # Ensure x and y have same length
+                x_range = range(len(self.metrics['exploration_rates']))
+                ax.plot(x_range, self.metrics['exploration_rates'], 'g-', alpha=0.7)
+                ax.set_xlabel('Episode' if len(x_range) <= len(episodes) else 'Training Step')
+                ax.set_ylabel('Exploration Rate')
+                ax.set_title('Exploration Schedule')
+                ax.grid(True, alpha=0.3)
+            else:
+                ax.text(0.5, 0.5, 'No exploration data available', 
+                    ha='center', va='center', transform=ax.transAxes)
+                ax.set_title('Exploration Schedule')
+            
+            # 5. Energy Levels - FIXED
+            ax = axes[1, 1]
+            if self.metrics.get('energies') and len(self.metrics['energies']) > 0:
+                # Ensure x and y have same length
+                x_range = range(len(self.metrics['energies']))
+                ax.plot(x_range, self.metrics['energies'], 'purple', alpha=0.7)
+                ax.set_xlabel('Training Step')
+                ax.set_ylabel('Energy')
+                ax.set_title('Metric Energy')
+                ax.grid(True, alpha=0.3)
+            else:
+                ax.text(0.5, 0.5, 'No energy data available', 
+                    ha='center', va='center', transform=ax.transAxes)
+                ax.set_title('Metric Energy')
+            
+            # 6. Reward Distribution - FIXED
+            ax = axes[1, 2]
+            if self.metrics.get('episode_rewards') and len(self.metrics['episode_rewards']) > 0:
+                ax.hist(self.metrics['episode_rewards'], bins=30, alpha=0.7, 
+                    color='blue', edgecolor='black')
+                ax.set_xlabel('Reward')
+                ax.set_ylabel('Frequency')
+                ax.set_title('Reward Distribution')
+                ax.grid(True, alpha=0.3)
+            else:
+                ax.text(0.5, 0.5, 'No reward data available', 
+                    ha='center', va='center', transform=ax.transAxes)
+                ax.set_title('Reward Distribution')
+            
+            # 7. Moving Average Rewards - FIXED
+            ax = axes[2, 0]
+            if self.metrics.get('episode_rewards') and len(self.metrics['episode_rewards']) >= 20:
+                window = min(20, len(self.metrics['episode_rewards']))
+                moving_avg = np.convolve(self.metrics['episode_rewards'], 
+                                        np.ones(window)/window, mode='valid')
+                # Ensure x and y have same length
+                x_range = range(window-1, len(self.metrics['episode_rewards']))
+                min_len = min(len(x_range), len(moving_avg))
+                if min_len > 0:
+                    ax.plot(x_range[:min_len], moving_avg[:min_len], 'orange', linewidth=2)
+                    ax.set_xlabel('Episode')
+                    ax.set_ylabel(f'Reward ({window}-ep MA)')
+                    ax.set_title('Moving Average Performance')
+                    ax.grid(True, alpha=0.3)
+            else:
+                ax.text(0.5, 0.5, 'Insufficient data for moving average', 
+                    ha='center', va='center', transform=ax.transAxes)
+                ax.set_title('Moving Average Performance')
+            
+            # 8. Success Rate - FIXED
+            ax = axes[2, 1]
+            if self.metrics.get('episode_rewards') and len(self.metrics['episode_rewards']) >= 20:
+                window = min(20, len(self.metrics['episode_rewards']))
+                success_rates = []
+                
+                # Calculate success rates
+                for i in range(len(self.metrics['episode_rewards']) - window + 1):
+                    window_rewards = self.metrics['episode_rewards'][i:i+window]
+                    successes = sum(1 for r in window_rewards if r > -500)
+                    success_rates.append(successes / window * 100)
+                
+                # Ensure x and y have same length
+                if success_rates:
+                    x_range = range(window-1, len(self.metrics['episode_rewards']))
+                    min_len = min(len(x_range), len(success_rates))
+                    if min_len > 0:
+                        ax.plot(x_range[:min_len], success_rates[:min_len], 'g-', linewidth=2)
+                        ax.set_xlabel('Episode')
+                        ax.set_ylabel('Success Rate (%)')
+                        ax.set_title(f'Success Rate (> -500)')
+                        ax.grid(True, alpha=0.3)
+                        ax.set_ylim([0, 100])
+            else:
+                ax.text(0.5, 0.5, 'Insufficient data for success rate', 
+                    ha='center', va='center', transform=ax.transAxes)
+                ax.set_title('Success Rate')
+            
+            # 9. Beta vs Reward - FIXED
+            ax = axes[2, 2]
+            if (self.metrics.get('betas') and self.metrics.get('episode_rewards') and
+                len(self.metrics['betas']) > 0 and len(self.metrics['episode_rewards']) > 0):
+                # Ensure same length
+                min_len = min(len(self.metrics['betas']), len(self.metrics['episode_rewards']))
+                if min_len > 0:
+                    scatter = ax.scatter(self.metrics['betas'][:min_len], 
+                                    self.metrics['episode_rewards'][:min_len],
+                                    c=range(min_len),
+                                    cmap='viridis', alpha=0.6, s=20)
+                    ax.set_xlabel('β (Stability Weight)')
+                    ax.set_ylabel('Reward')
+                    ax.set_title('Stability-Performance Tradeoff')
+                    ax.grid(True, alpha=0.3)
+                    plt.colorbar(scatter, ax=ax, label='Episode')
+            else:
+                ax.text(0.5, 0.5, 'Insufficient data for scatter plot', 
+                    ha='center', va='center', transform=ax.transAxes)
+                ax.set_title('Stability-Performance Tradeoff')
+            
+            # Hide any unused axes
+            for i in range(9):
+                if not axes.flatten()[i].has_data():
+                    axes.flatten()[i].axis('off')
+            
+            plt.suptitle(f'Robust CDM: Training Results (Final Reward: {self.metrics.get("episode_rewards", [-1])[-1]:.1f})', 
+                        fontsize=16, fontweight='bold')
+            plt.tight_layout()
+            
+            # Save the plot
+            save_path = Path(self.save_dir) / "training_results.png"
+            plt.savefig(save_path, dpi=150, bbox_inches='tight', facecolor='white')
+            print(f"✓ Training results saved to {save_path}")
+            
+            # Show plot if enabled
+            if self.config.PLOT_RESULTS:
+                plt.show()
+            else:
+                plt.close(fig)
+                
+        except Exception as e:
+            print(f"✗ Error plotting training results: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # Create simple fallback plot
+            try:
+                fig, ax = plt.subplots(figsize=(10, 6))
+                if self.metrics.get('episode_rewards'):
+                    ax.plot(range(len(self.metrics['episode_rewards'])), 
+                        self.metrics['episode_rewards'])
+                    ax.set_xlabel('Episode')
+                    ax.set_ylabel('Reward')
+                    ax.set_title('Basic Training Progress')
+                    ax.grid(True)
+                    
+                    save_path = Path(self.save_dir) / "training_results_fallback.png"
+                    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+                    print(f"✓ Fallback plot saved to {save_path}")
+                    
+                    if self.config.PLOT_RESULTS:
+                        plt.show()
+                    else:
+                        plt.close()
+            except:
+                print("✗ Could not create fallback plot either")
 # ============================
 # TESTING AND VALIDATION
 # ============================

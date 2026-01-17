@@ -1,0 +1,54 @@
+================================================================================
+CDM TRAINING SUMMARY REPORT
+================================================================================
+
+ENVIRONMENT: Pendulum-v1
+TRAINING TIMESTAMP: Unknown
+
+PERFORMANCE METRICS:
+----------------------------------------
+Total Episodes: 200
+Final Episode Reward: -1786.12
+Last 10 Episodes Average: -1366.11
+Last 10 Episodes Std: 373.46
+Best Reward: -624.29 (Episode 178)
+
+STABILITY METRICS:
+----------------------------------------
+Beta Range: [0.298, 1.259]
+Final Beta: 1.259
+Average Energy: 0.8051
+Energy Variance: 0.356244
+Final Exploration Rate: 0.999
+
+LOSS STATISTICS:
+----------------------------------------
+DYNAMICS Loss:
+  Final: 0.000396
+  Average: 0.003523
+  Reduction: 100.0%
+
+METRIC Loss:
+  Final: 0.473147
+  Average: 0.139856
+  Reduction: 41.4%
+
+CRITIC Loss:
+  Final: 0.129540
+  Average: 0.045453
+  Reduction: 94.4%
+
+ACTOR Loss:
+  Final: 0.503766
+  Average: 0.201159
+  Reduction: -5.2%
+
+SAMPLE EFFICIENCY:
+----------------------------------------
+Total Cumulative Reward: -250760
+Average Reward per Episode: -1253.8
+Performance Improvement (1st to 2nd half): -7.0%
+
+================================================================================
+END OF REPORT
+================================================================================

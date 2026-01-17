@@ -1,0 +1,50 @@
+{
+  "summary_table": [
+    {
+      "Variant": "Full CDM",
+      "Trials": 3,
+      "Success": 3,
+      "Final Reward": "-1193.3 \u00b1 195.2",
+      "Best Reward": "-734.4 \u00b1 144.3",
+      "Avg Reward": "-1056.8 \u00b1 78.7",
+      "Time (s)": "10 \u00b1 1"
+    },
+    {
+      "Variant": "No Metric Reg",
+      "Trials": 3,
+      "Success": 3,
+      "Final Reward": "-1194.7 \u00b1 159.3",
+      "Best Reward": "-843.0 \u00b1 94.3",
+      "Avg Reward": "-1239.9 \u00b1 155.0",
+      "Time (s)": "9 \u00b1 0"
+    },
+    {
+      "Variant": "No Contraction",
+      "Trials": 3,
+      "Success": 3,
+      "Final Reward": "-1197.7 \u00b1 479.3",
+      "Best Reward": "-704.1 \u00b1 55.0",
+      "Avg Reward": "-1277.1 \u00b1 97.5",
+      "Time (s)": "9 \u00b1 0"
+    },
+    {
+      "Variant": "Fixed Metric",
+      "Trials": 3,
+      "Success": 3,
+      "Final Reward": "-1283.2 \u00b1 419.2",
+      "Best Reward": "-829.1 \u00b1 128.7",
+      "Avg Reward": "-1204.4 \u00b1 38.9",
+      "Time (s)": "1 \u00b1 0"
+    },
+    {
+      "Variant": "Single Dynamics",
+      "Trials": 3,
+      "Success": 3,
+      "Final Reward": "-1377.6 \u00b1 221.3",
+      "Best Reward": "-821.4 \u00b1 112.9",
+      "Avg Reward": "-1157.1 \u00b1 43.9",
+      "Time (s)": "1 \u00b1 0"
+    }
+  ],
+  "timestamp": "2026-01-16T15:27:10.649548"
+}

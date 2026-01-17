@@ -1,0 +1,49 @@
+{
+  "ablation_variants": {
+    "full_cdm": {
+      "name": "Full CDM",
+      "description": "Complete implementation",
+      "config_modifications": {}
+    },
+    "no_contraction": {
+      "name": "No Contraction",
+      "description": "\u03b2=0, no stability regularization",
+      "config_modifications": {
+        "INITIAL_BETA": 0.0,
+        "BETA_MIN": 0.0,
+        "BETA_MAX": 0.0
+      }
+    },
+    "fixed_metric": {
+      "name": "Fixed Metric",
+      "description": "M(x) = I (identity metric)",
+      "special_case": "fixed_metric"
+    },
+    "single_dynamics": {
+      "name": "Single Dynamics",
+      "description": "No ensemble (K=1)",
+      "config_modifications": {
+        "ENSEMBLE_SIZE": 1
+      }
+    },
+    "no_metric_reg": {
+      "name": "No Metric Reg",
+      "description": "No metric regularization",
+      "config_modifications": {
+        "METRIC_REGULARIZATION": 0.0
+      }
+    }
+  },
+  "num_seeds": 3,
+  "seeds": [
+    42,
+    123,
+    456
+  ],
+  "num_episodes": 10,
+  "eval_interval": 10,
+  "num_eval_episodes": 2,
+  "save_dir": "ablation_final_20260116_152533",
+  "generate_plots": true,
+  "save_metrics": true
+}

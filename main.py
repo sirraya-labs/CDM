@@ -46,7 +46,7 @@ class Config:
     CRITIC_HIDDEN_DIM: int = 256
     
     # Training Parameters (optimized)
-    TOTAL_EPISODES: int = 50
+    TOTAL_EPISODES: int = 200
     BATCH_SIZE: int = 256
     GAMMA: float = 0.99
     TAU: float = 0.005

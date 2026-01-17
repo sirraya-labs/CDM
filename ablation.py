@@ -848,8 +848,8 @@ def main():
     
     # Create config
     ablation_config = AblationConfig(
-        num_seeds=3,
-        num_episodes=10,
+        num_seeds=1,
+        num_episodes=200,
         save_dir=f"ablation_final_{timestamp}"
     )
     

@@ -1,5 +1,5 @@
 
-# Contraction Dynamics Model (R-CDM)
+# Contraction Dynamics Model (CDM)
 
 **Learning Contraction Metrics for Provably Stable Model-Based Reinforcement Learning**  
 *Mathematically-Guaranteed Stable Robot Control through Learned Riemannian Metrics*

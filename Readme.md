@@ -1,6 +1,4 @@
-I'll help you incorporate the generated figures into your README documentation. Looking at the output, here's how to reference the plots in your documentation:
 
-```markdown
 # Contraction Dynamics Model (R-CDM)
 
 **Learning Contraction Metrics for Provably Stable Model-Based Reinforcement Learning**  

@@ -1,463 +1,505 @@
+# Contraction-Regularized Model-Based RL (CR-MBRL)
 
-# Contraction Dynamics Model (CDM)
+**A Contraction-Inspired Stability Framework for Model-Based Reinforcement Learning**  
+*Empirically Evaluating the Impact of Learned Riemannian Metrics on Policy Robustness*
 
-**Learning Contraction Metrics for Provably Stable Model-Based Reinforcement Learning**  
-*Mathematically-Guaranteed Stable Robot Control through Learned Riemannian Metrics*
+[Python 3.8+](https://www.python.org/downloads/) | [PyTorch 2.0+](https://pytorch.org/) | [License: MIT](https://opensource.org/licenses/MIT)
 
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![PyTorch 2.0+](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Paper](https://img.shields.io/badge/Paper-arXiv:2401.xxxxx-b31b1b)](https://arxiv.org/abs/2401.xxxxx)
+---
 
-## 📖 Overview
+## Overview
 
-Contraction Dynamics Model (R-CDM) is a novel model-based reinforcement learning framework that learns *contraction metrics*—Riemannian metrics that ensure exponential convergence of system trajectories—alongside dynamics models and control policies. Unlike traditional RL methods that only optimize for reward, R-CDM provides **mathematical stability guarantees** while maintaining competitive performance, making it ideal for safety-critical applications like robotics and autonomous systems.
+CR-MBRL is a research prototype that explores whether contraction-inspired regularization can improve the robustness and sample efficiency of model-based reinforcement learning. The framework learns a state-dependent Riemannian metric alongside a dynamics model and control policy, using contraction-like energy shaping as a stability-inducing regularizer.
 
-Developed by **Amir Hameed** at **Sirraya Labs**, this implementation bridges contraction theory with deep learning to produce controllers that are both capable and reliable.
+**Primary Research Question:** Does adding contraction-inspired regularization to standard MBRL improve empirical robustness to perturbations and reduce policy variance?
 
-## 📊 Experimental Results
+Developed by **Amir Hameed** at **Sirraya Labs**, this is an active research project at the hypothesis-testing phase.
 
-### Training Performance
-Below are the comprehensive results from a 200-episode training run on HalfCheetah-v4:
+---
 
-![Training Results](figures/training_results_real.png)
-*Figure 1: Complete training performance showing episode rewards, evaluation rewards, and loss dynamics over 200 episodes.*
+## Research Disclaimer
 
-### Key Metrics
-- **Final Episode Reward**: -1786.1
-- **Average Evaluation Reward**: -1226.9 ± 79.3
-- **Training Stability**: Consistent improvement with low variance
-- **Contraction Rate Evolution**: Adaptive stability-weight (β) optimization
+This implementation provides **contraction-inspired regularization**, not mathematically proven stability guarantees. The contraction metric serves as a soft constraint that empirically encourages stable behavior, but the system does not formally certify contraction.
 
-### Detailed Analysis
-The system generates comprehensive visualizations to analyze different aspects of the learning process:
+**What this code implements:**
+- Dynamics model using an ensemble of neural networks with uncertainty quantification
+- State-dependent Riemannian metric that penalizes energy growth along trajectories
+- Metric-based energy regularization in the policy optimization objective
+- Adaptive balancing of task reward with stability regularization
+- Comprehensive logging and visualization of training dynamics
 
-1. **Learning Dynamics Analysis**
-   ![Learning Analysis](figures/learning_analysis.png)
-   *Figure 2: Enhanced learning curves showing reward trends, exploration rates, and gradient norms.*
+**What this code does not implement:**
+- Formal stability proofs or certificates
+- Mathematical contraction guarantees
+- Comparisons against established RL baselines (SAC, TD3, MBPO, etc.)
+- Demonstrated superiority over existing methods
 
-2. **Stability Analysis**
-   ![Stability Analysis](figures/stability_analysis.png)
-   *Figure 3: Stability metrics including contraction energy evolution and beta parameter adaptation.*
+---
 
-3. **Loss Dynamics**
-   ![Loss Dynamics](figures/loss_dynamics.png)
-   *Figure 4: Evolution of all loss components (dynamics, metric, critic, actor) throughout training.*
+## Implemented Features
 
-4. **Performance Comparison**
-   ![Performance Comparison](figures/performance_comparison.png)
-   *Figure 5: Comparative analysis of different algorithm variants (from ablation studies).*
+### Core Components
 
-5. **Sample Efficiency**
-   ![Sample Efficiency](figures/sample_efficiency.png)
-   *Figure 6: Reward as a function of training samples, demonstrating learning efficiency.*
+**Ensemble Dynamics Model:** 7-member ensemble with learned weights and uncertainty estimation for robust next-state prediction. Each member uses residual connections and layer normalization for training stability.
 
-## 🎯 Key Features
+**Riemannian Metric Network:** Learns state-dependent positive-definite metric M(x) = L(x)L(x)^T + epsilon*I using Cholesky decomposition for guaranteed positive-definiteness. Supports both standard and attention-based architectures.
 
-- **🔒 Provable Stability Guarantees**: Enforces contraction conditions that ensure exponential convergence of trajectories
-- **📐 Learned Riemannian Metrics**: Adaptively learns state-dependent distance metrics \( M(x) = L(x)L(x)^T + εI \)
-- **🎯 Adaptive Stability-Performance Tradeoff**: Learns to balance stability requirements with reward maximization
-- **🤖 Ensemble Dynamics**: Combines contraction theory with deep ensembles for uncertainty-aware planning
-- **📊 Comprehensive Ablation Studies**: Systematically evaluates each component's contribution
-- **⚡ Production-Ready Implementation**: Complete with error handling, logging, and visualization
+**Contraction-Inspired Energy Regularization:** Penalizes energy growth E(x_{t+1}) - alpha^2 * E(x_t) using softplus loss, where energy is computed as E(x) = x^T M(x) x.
 
-## 🏃‍♂️ Quick Start
+**Stochastic Policy with Adaptive Exploration:** Gaussian policy with learnable standard deviation and multiple exploration strategies (OU noise, Gaussian, parameter noise). Strategy selection adapts based on historical success rates.
+
+**Prioritized Experience Replay:** TD-error based sampling with importance sampling weights. New experiences receive maximum priority to ensure recent data utilization.
+
+### Enhanced Features
+
+**Curriculum Learning:** Progressive training stages that automatically transition from stability-focused to performance-focused optimization. Three stages with smooth interpolation: stability focus, performance focus, and fine-tuning.
+
+**Meta-Learning Controller:** Adaptive contraction rate based on energy trend analysis. Increases contraction when energy rises (potential instability), relaxes when energy decreases.
+
+**Attention-Based Metric Network:** Self-attention mechanism over state dimensions for learning which state components are most important for stability. Includes learnable temperature parameter for attention scaling.
+
+**Geodesic Regularization:** Smoothness constraint that penalizes rapid changes in the metric along random directions in state space. Encourages the metric to vary smoothly, preventing discontinuous stability boundaries.
+
+**Safety Margin Monitoring:** Distance-to-boundary estimation using the learned metric geometry. Computes safety margin as distance in the metric space to unsafe regions, though this is purely observational without enforcement.
+
+**Metric Conditioning:** Eigendecomposition-based conditioning to bound the condition number of the metric matrix, preventing numerical instability during Cholesky decomposition.
+
+### Training Enhancements
+
+**Double Q-Learning:** Twin critic networks with minimum Q-value selection for conservative value estimates and reduced overestimation bias.
+
+**Conservative Q-Learning Penalty:** Adds penalty term to Q-value updates to prevent overestimation on out-of-distribution actions.
+
+**Gradient Clipping:** Per-component gradient norm clipping to prevent exploding gradients, especially important for the coupled multi-objective optimization.
+
+**Learning Rate Scheduling:** Cosine annealing schedules for dynamics and policy optimizers.
+
+**Adaptive Beta Scheduling:** Stability weight beta automatically adjusts based on performance improvement, decreasing when rewards improve and increasing when they degrade.
+
+---
+
+## Experimental Results
+
+### Pendulum-v1 (200 episodes)
+
+Results from a complete training run with all enhanced features enabled. Note that results vary across random seeds.
+
+**Key Observations:**
+
+| Metric | Behavior | Interpretation |
+|--------|----------|----------------|
+| Episode Reward | Generally improving | Task learning progresses |
+| Evaluation Reward | More stable than training | Deterministic policy reduces variance |
+| Contraction Energy | Decreasing trend | Energy regularization has measurable effect |
+| Beta Parameter | Adaptive changes | System responds to performance feedback |
+| Metric Condition Number | Bounded | Numerically stable metric learning |
+| Dynamics Loss | Decreasing | Model accuracy improves |
+| Critic Loss | May fluctuate | Coupled optimization creates tension |
+
+**Generated Visualizations:**
+
+The system automatically produces:
+1. Training rewards and evaluation performance over episodes
+2. Curriculum stage progression during training
+3. Beta and alpha parameter adaptation over time
+4. Safety margin estimates per episode
+5. All loss components (dynamics, metric, critic, actor)
+6. Energy levels and geodesic regularization losses
+7. Exploration rate schedule
+8. Reward distribution histogram
+9. Moving average performance
+10. Success rate over training
+11. Stability-performance tradeoff scatter plot
+12. Contraction-performance tradeoff scatter plot
+13. Gradient norms for all components
+14. Training summary statistics
+
+---
+
+## Quick Start
 
 ### Installation
 
 ```bash
-# Clone the repository
 git clone https://github.com/sirraya-labs/CDM.git
 cd CDM
 
-# Create virtual environment
 python -m venv venv
-
-# Activate environment
-# On Windows:
-venv\Scripts\activate
-# On Mac/Linux:
 source venv/bin/activate
 
-# Install dependencies
-pip install torch numpy gymnasium matplotlib seaborn pandas
+pip install torch numpy gymnasium matplotlib
 ```
 
-### Running a Single Experiment
+### Basic Usage
 
 ```python
-# Run the main training script
-python main.py
-
-# Or specify custom parameters
-python main.py --env HalfCheetah-v4 --episodes 200 --beta 0.3
-```
-
-### Viewing Results
-After training completes, all plots will be automatically generated in the `figures/` directory:
-- `training_results_real.png` - Main training performance
-- `learning_analysis.png` - Detailed learning curves
-- `stability_analysis.png` - Stability metrics
-- `loss_dynamics.png` - Loss component evolution
-- `training_summary.txt` - Text summary of results
-
-### Running Ablation Studies
-
-```python
-# Comprehensive ablation study comparing all variants
-python ablation_study.py
-
-# This will generate:
-# - Publication-ready figures in figures/
-# - Statistical analysis in stats/
-# - LaTeX tables in tables/
-# - Complete metrics in ablation_results/
-```
-
-## Project Structure
-
-```
-CDM/
-├── main.py                      # Main training script with R-CDM implementation
-├── ablation_study.py            # Comprehensive ablation study framework
-├── requirements.txt             # Python dependencies
-└── README.md                    # This documentation
-
-# Generated directories (created during runtime):
-├── figures/                     # All visualization outputs
-│   ├── training_results_real.png/pdf
-│   ├── learning_analysis.png/pdf
-│   ├── stability_analysis.png/pdf
-│   ├── loss_dynamics.png/pdf
-│   ├── performance_comparison.png/pdf
-│   ├── sample_efficiency.png/pdf
-│   └── training_summary.txt
-│
-├── cdm_robust_results/          # Single experiment results
-│   ├── config.json              # Training configuration
-│   ├── training_metrics.json    # Performance metrics
-│   └── *.pth                    # Trained models
-│
-└── ablation_studies_YYYYMMDD_HHMMSS/  # Ablation study results
-    ├── figures/                 # Publication-ready plots
-    │   ├── performance_comparison.png
-    │   ├── learning_dynamics.png
-    │   └── component_importance.png
-    ├── tables/                  # Data tables
-    │   ├── results.csv
-    │   └── results.tex          # LaTeX table
-    ├── stats/                   # Statistical analysis
-    │   ├── significance_matrix.csv
-    │   └── p_values.csv
-    └── final_results.pkl        # Complete dataset
-```
-
-## Core Components
-
-### 1. **Dynamics Ensemble** (`DynamicsEnsemble`)
-```python
-# Ensemble of 7 neural networks for uncertainty estimation
-self.dynamics = DynamicsEnsemble(
-    state_dim=STATE_DIM,
-    action_dim=ACTION_DIM,
-    ensemble_size=7,
-    hidden_dim=128
-)
-```
-
-### 2. **Contraction Metric** (`ContractionMetric`)
-```python
-# Learns Riemannian metric M(x) = L(x)L(x)^T + εI
-self.metric_net = ContractionMetric(
-    state_dim=STATE_DIM,
-    hidden_dim=128,
-    epsilon=0.05
-)
-```
-
-### 3. **Enhanced Policy Network** (`EnhancedPolicyNetwork`)
-```python
-# Gaussian policy with learnable exploration
-self.policy = EnhancedPolicyNetwork(
-    state_dim=STATE_DIM,
-    action_dim=ACTION_DIM,
-    hidden_dim=256
-)
-```
-
-### 4. **Contraction Loss**
-```python
-# Enforces: A(x)^T M(x_{t+1}) A(x) ≼ (1 - β) M(x_t)
-contraction_loss = EnhancedRiemannianOperations.compute_contraction_loss(
-    states, next_states, metric_net,
-    alpha=0.85,  # Contraction rate
-    beta=0.3     # Stability weight
-)
-```
-
-## Ablation Variants
-
-The framework includes 5 core ablation variants for systematic analysis:
-
-| Variant | Description | Key Modification |
-|---------|-------------|------------------|
-| **Full CDM** | Complete implementation | Baseline |
-| **No Contraction** | β=0, no stability regularization | `INITIAL_BETA = 0.0` |
-| **Fixed Metric** | M(x) = I (identity metric) | Identity metric, no learning |
-| **Single Dynamics** | No ensemble (K=1) | `ENSEMBLE_SIZE = 1` |
-| **No Metric Reg** | No metric regularization | `METRIC_REGULARIZATION = 0.0` |
-
-![Ablation Results](figures/performance_comparison.png)
-*Figure 7: Performance comparison of different ablation variants. Full CDM shows the best stability-performance tradeoff.*
-
-## Training Workflow
-
-### Phase 1: Data Collection
-```python
-# Collect experience with adaptive exploration
-for step in range(MAX_STEPS):
-    action = agent.select_action(state, use_exploration=True)
-    next_state, reward, done, _ = env.step(action)
-    replay_buffer.push(state, action, reward, next_state, done)
-```
-
-### Phase 2: Joint Learning
-```python
-# 1. Update dynamics model (minimize prediction error)
-dynamics_loss = update_dynamics(batch)
-
-# 2. Update contraction metric (enforce stability)
-metric_loss = update_metric(batch, beta=current_beta)
-
-# 3. Update policy (maximize reward + stability bonus)
-policy_loss = update_policy(batch)
-```
-
-### Phase 3: Evaluation & Adaptation
-```python
-# Evaluate without exploration
-eval_reward = agent.evaluate(eval_env, num_episodes=5)
-
-# Adapt stability weight β based on performance
-if reward_improved:
-    beta *= 0.995  # Decrease stability focus
-else:
-    beta *= 1.02   # Increase stability focus
-```
-
-## Performance Results
-
-### HalfCheetah-v4 (200 episodes)
-Based on the experimental run shown in the figures:
-
-| Metric | Value | Interpretation |
-|--------|-------|----------------|
-| **Final Episode Reward** | -1786.1 | Environment-specific performance |
-| **Average Eval Reward** | -1226.9 ± 79.3 | Consistent evaluation performance |
-| **Evaluation Count** | 11 | Regular performance checks |
-| **Dynamics Loss** | Converged | Successful model learning |
-| **Contraction Rate** | Adaptive | Effective stability optimization |
-
-### Stability-Performance Tradeoff Analysis
-![Stability-Performance](figures/stability_analysis.png)
-*Figure 8: The evolution of contraction energy and beta parameter shows effective adaptation of stability constraints.*
-
-### Loss Convergence
-![Loss Convergence](figures/loss_dynamics.png)
-*Figure 9: All loss components converge smoothly, indicating stable training dynamics.*
-
-## Key Insights from Experiments
-
-### 1. **Stability-Performance Tradeoff**
-- Contraction constraints provide mathematical stability guarantees
-- Adaptive β parameter balances stability requirements with reward maximization
-- Final reward of -1786.1 demonstrates effective learning on HalfCheetah
-
-### 2. **Consistent Evaluation Performance**
-- 11 evaluation checkpoints show consistent performance: -1226.9 ± 79.3
-- Low variance indicates stable policy learning
-- Regular evaluations ensure reliable performance assessment
-
-### 3. **Smooth Learning Dynamics**
-- All loss components (dynamics, metric, critic, actor) converge smoothly
-- No catastrophic forgetting or training instability
-- Effective exploration rate adaptation
-
-### 4. **Effective Metric Learning**
-- Learned contraction metrics adapt to state-space geometry
-- Metric regularization prevents numerical instability
-- Energy levels show appropriate state-space scaling
-
-## Visualization System
-
-The framework generates comprehensive visualizations automatically:
-
-### Core Visualizations Generated:
-1. **`training_results_real.png`** - Main training dashboard
-2. **`learning_analysis.png`** - Detailed learning curves
-3. **`stability_analysis.png`** - Stability metrics and adaptation
-4. **`loss_dynamics.png`** - Loss component evolution
-5. **`performance_comparison.png`** - Ablation study results
-6. **`sample_efficiency.png`** - Learning efficiency analysis
-
-### Visualization Features:
-- **Publication-ready quality** with consistent styling
-- **Dual format output** (.png for quick viewing, .pdf for publications)
-- **Comprehensive metrics** covering all aspects of learning
-- **Automatic summary generation** with key statistics
-
-## Advanced Usage
-
-### Custom Environments
-
-```python
+from main import Config, EnhancedContractionDynamicsAgent
 import gymnasium as gym
 
-# Create custom configuration
-config = Config(
-    ENV_NAME="CustomRobot-v0",
-    STATE_DIM=12,
-    ACTION_DIM=6,
-    TOTAL_EPISODES=100
-)
+config = Config()
+config.ENV_NAME = "Pendulum-v1"
+config.TOTAL_EPISODES = 200
 
-# Initialize agent
-agent = ContractionDynamicsAgent(config)
+agent = EnhancedContractionDynamicsAgent(config)
 
-# Train
-agent.train(env, eval_env)
+train_env = gym.make(config.ENV_NAME)
+eval_env = gym.make(config.ENV_NAME)
+
+results = agent.train(train_env, eval_env)
 ```
 
-### Hyperparameter Tuning
+### Feature Configuration
 
 ```python
-# Experiment with different stability weights
-beta_values = [0.1, 0.3, 0.5, 1.0]
-results = {}
+config = Config()
 
-for beta in beta_values:
-    config = Config(INITIAL_BETA=beta, BETA_MAX=beta*2)
-    agent = ContractionDynamicsAgent(config)
-    results[beta] = agent.train(env, eval_env)
+# Toggle enhanced features
+config.USE_CURRICULUM = True
+config.USE_META_LEARNING = True
+config.USE_ATTENTION_METRIC = True
+config.USE_SAFETY_CONSTRAINTS = True
+config.USE_GEODESIC_REGULARIZATION = True
+
+# Adjust contraction parameters
+config.CONTRACTION_RATE_ALPHA = 0.85
+config.INITIAL_BETA = 0.3
+config.EPSILON_METRIC = 0.05
 ```
 
-### Batch Experiments
+### Output Structure
 
+After training completes, results are saved to `cdm_enhanced_results/`:
+
+```
+cdm_enhanced_results/
+    config.json                 # Full configuration
+    training_metrics.json       # All tracked metrics (JSON)
+    training_metrics.pkl        # All tracked metrics (pickle)
+    best_policy.pth             # Best evaluation performance
+    best_critic.pth
+    best_dynamics.pth
+    best_metric.pth
+    best_target_policy.pth
+    best_target_critic.pth
+    final_policy.pth            # Final trained models
+    final_critic.pth
+    final_dynamics.pth
+    final_metric.pth
+    final_target_policy.pth
+    final_target_critic.pth
+    training_results.png        # Comprehensive visualization
+```
+
+---
+
+## Architecture Details
+
+### Dynamics Model
+
+Each ensemble member is a residual network with two residual blocks:
+
+```
+Input: [state, action]
+  -> Linear + LayerNorm + ReLU + Dropout
+  -> Residual Block 1 (Linear + LayerNorm + ReLU + Dropout + Linear)
+  -> Residual Block 2 (Linear + LayerNorm + ReLU + Dropout + Linear)
+  -> Linear output: next_state
+```
+
+The ensemble aggregates predictions using learned softmax weights and computes both mean prediction and epistemic uncertainty (variance across ensemble members).
+
+### Metric Network
+
+Two variants available:
+
+**Standard:** Direct feedforward network that outputs lower-triangular Cholesky factors L(x). The metric is constructed as M = LL^T + epsilon*I to guarantee positive-definiteness.
+
+**Attention-Based:** Applies multi-head self-attention over state dimensions before the feedforward network, allowing the metric to focus on the most relevant state components for stability.
+
+Diagonal entries use softplus activation with a minimum offset (0.01). Off-diagonal entries use tanh activation scaled to [-0.1, 0.1] for numerical stability.
+
+### Policy Network
+
+Gaussian policy with learned mean and standard deviation:
+- Mean network: Two hidden layers with LayerNorm, ReLU, and Dropout
+- Standard deviation: Learned log_std parameter initialized to -1.0
+- Action scaling: Output multiplied by action_scale (2.0) and passed through tanh
+
+### Critic Network
+
+Double Q-network with twin critics:
+- Each critic: Two hidden layers with LayerNorm, ReLU, and Dropout
+- Minimum of two Q-values used for conservative updates
+- Separate target networks with soft updates (tau=0.005)
+
+---
+
+## Training Process
+
+### Episode Execution
+
+1. Reset environment and exploration noise processes
+2. Get curriculum parameters for current training stage
+3. For each step in episode:
+   - Select action using policy with exploration noise (scaled by curriculum)
+   - Execute action in environment
+   - Optionally compute safety margin of current state
+   - Store transition in replay buffer
+4. Update state normalization statistics
+5. Update exploration strategy based on episode reward
+6. Update meta-learning controller with reward and energy data
+7. Perform multiple training steps if buffer has sufficient data
+
+### Training Step
+
+Each training step on a sampled batch:
+
+1. **Update Dynamics:** Minimize weighted MSE between predicted and actual next states, with uncertainty regularization
+2. **Update Metric:** Minimize contraction-inspired energy loss with geodesic regularization and consistency across perturbed trajectories
+3. **Update Critic:** Double Q-learning with conservative penalty and TD-error based prioritized replay updates
+4. **Update Policy:** Maximize Q-values with contraction bonus, entropy bonus, safety penalty, and stability penalties
+
+### Beta Adaptation
+
+After each episode:
+- If reward improved: beta *= 0.995 (reduce stability focus)
+- If reward degraded: beta *= 1.02 (increase stability focus)
+- Beta clipped to [BETA_MIN, BETA_MAX]
+
+Curriculum overrides manual beta adaptation, providing stage-appropriate values with smooth interpolation between stages.
+
+---
+
+## Research Methodology
+
+### Current Status
+
+This project is in the **hypothesis testing phase**. The implementation demonstrates that contraction-inspired regularization can be integrated into MBRL, but has not yet established:
+
+1. Whether the regularization provides measurable benefits over standard MBRL
+2. Whether the learned metrics capture meaningful geometry
+3. Whether the approach scales to more complex environments
+4. How it compares to established methods
+
+### Planned Validation
+
+**Ablation Studies:** Systematically remove each component (contraction loss, metric learning, ensemble, curriculum) to isolate effects.
+
+**Baseline Comparisons:** Implement and compare against SAC, TD3, MBPO, PETS, Dreamer on identical sample budgets.
+
+**Robustness Testing:** Evaluate perturbation recovery time, performance under observation noise, sensitivity to parameter variation.
+
+**Scale Testing:** Extend from Pendulum to MuJoCo environments (HalfCheetah, Hopper, Walker2d, Ant).
+
+**Statistical Validation:** Run multiple seeds (minimum 5) with confidence intervals and significance tests.
+
+### Suggested Experiments
+
+**Contraction Effect Isolation:**
 ```python
-# Run multiple seeds for statistical significance
-seeds = [42, 123, 456, 789, 999]
-all_results = []
-
-for seed in seeds:
-    set_seed(seed)
-    config = Config(SEED=seed)
-    agent = ContractionDynamicsAgent(config)
-    results = agent.train(env, eval_env)
-    all_results.append(results)
+configs = [
+    Config(INITIAL_BETA=0.3),  # With contraction
+    Config(INITIAL_BETA=0.0),  # Without contraction
+]
 ```
+
+**Feature Ablation:**
+```python
+configs = [
+    Config(USE_CURRICULUM=True, USE_META_LEARNING=False),
+    Config(USE_CURRICULUM=False, USE_META_LEARNING=True),
+    Config(USE_CURRICULUM=False, USE_META_LEARNING=False),
+]
+```
+
+**Architecture Comparison:**
+```python
+configs = [
+    Config(USE_ATTENTION_METRIC=True),   # Attention-based metric
+    Config(USE_ATTENTION_METRIC=False),  # Standard metric
+]
+```
+
+**Robustness Evaluation:**
+```python
+def evaluate_robustness(agent, env, perturbation_scale=0.1, num_episodes=10):
+    """Measure recovery after state perturbation."""
+    results = []
+    for ep in range(num_episodes):
+        state, _ = env.reset()
+        state += np.random.randn(*state.shape) * perturbation_scale
+        episode_reward = 0
+        for step in range(env.spec.max_episode_steps):
+            action = agent.select_action(state, deterministic=True, use_exploration=False)
+            state, reward, terminated, truncated, _ = env.step(action)
+            episode_reward += reward
+            if terminated or truncated:
+                break
+        results.append(episode_reward)
+    return np.mean(results), np.std(results)
+```
+
+---
+
+## Configuration Reference
+
+### Environment Settings
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| ENV_NAME | "Pendulum-v1" | Gymnasium environment |
+| STATE_DIM | 3 | State space dimension |
+| ACTION_DIM | 1 | Action space dimension |
+| MAX_EPISODE_LENGTH | 200 | Maximum steps per episode |
+
+### Network Architecture
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| DYNAMICS_HIDDEN_DIM | 128 | Dynamics model hidden size |
+| POLICY_HIDDEN_DIM | 256 | Policy network hidden size |
+| METRIC_HIDDEN_DIM | 128 | Metric network hidden size |
+| CRITIC_HIDDEN_DIM | 256 | Critic network hidden size |
+| ENSEMBLE_SIZE | 7 | Number of dynamics models |
+| ATTENTION_HEADS | 3 | Attention heads for metric |
+
+### Training Parameters
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| TOTAL_EPISODES | 200 | Training episodes |
+| BATCH_SIZE | 256 | Samples per update |
+| GAMMA | 0.99 | Discount factor |
+| TAU | 0.005 | Target network update rate |
+| LEARNING_START | 1000 | Steps before training begins |
+| GRADIENT_STEPS | 40 | Updates per episode |
+
+### Contraction Parameters
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| CONTRACTION_RATE_ALPHA | 0.85 | Target contraction rate |
+| CONTRACTION_RATE_MIN | 0.7 | Minimum alpha |
+| CONTRACTION_RATE_MAX | 0.95 | Maximum alpha |
+| INITIAL_BETA | 0.3 | Initial stability weight |
+| BETA_MIN | 0.05 | Minimum beta |
+| BETA_MAX | 2.0 | Maximum beta |
+| EPSILON_METRIC | 0.05 | Metric regularization |
+| TARGET_CONDITION_NUMBER | 100.0 | Max condition number |
+
+### Learning Rates
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| ACTOR_LR | 3e-4 | Policy learning rate |
+| CRITIC_LR | 3e-4 | Critic learning rate |
+| DYNAMICS_LR | 1e-3 | Dynamics learning rate |
+| METRIC_LR | 5e-5 | Metric learning rate |
+
+### Feature Toggles
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| USE_CURRICULUM | True | Progressive training stages |
+| USE_META_LEARNING | True | Adaptive contraction rate |
+| USE_ATTENTION_METRIC | True | Attention-based metric |
+| USE_SAFETY_CONSTRAINTS | True | Safety margin monitoring |
+| USE_GEODESIC_REGULARIZATION | True | Metric smoothness constraint |
+
+---
 
 ## Troubleshooting
 
-### Common Issues
+**Numerical instability in metric:**
+Increase EPSILON_METRIC (try 0.1) or METRIC_REGULARIZATION (try 0.01). Check that condition numbers remain bounded.
 
-1. **Numerical instability in metric learning**
-   ```python
-   # Solution: Increase epsilon or add regularization
-   config.EPSILON_METRIC = 0.1
-   config.METRIC_REGULARIZATION = 0.01
-   ```
+**Policy converges to boundary actions:**
+Reduce ACTOR_LR or increase entropy bonus weight. Check if contraction penalty is dominating the value loss.
 
-2. **Slow convergence**
-   ```python
-   # Solution: Increase learning rates or batch size
-   config.DYNAMICS_LR = 3e-3
-   config.BATCH_SIZE = 512
-   ```
+**Dynamics model overfits:**
+Increase dropout rate, reduce DYNAMICS_HIDDEN_DIM, or add weight decay to dynamics optimizer.
 
-3. **Out of memory**
-   ```python
-   # Solution: Reduce ensemble size or hidden dimensions
-   config.ENSEMBLE_SIZE = 5
-   config.DYNAMICS_HIDDEN_DIM = 64
-   ```
+**Critic loss diverges:**
+Reduce CRITIC_LR, increase batch size, or check for exploding Q-values. Conservative penalty may need adjustment.
 
-4. **Plotting errors**
-   ```python
-   # Solution: Ensure matplotlib backend is properly configured
-   import matplotlib
-   matplotlib.use('Agg')  # Non-interactive backend for servers
-   ```
+**Memory usage too high:**
+Reduce ENSEMBLE_SIZE, REPLAY_BUFFER_SIZE, or hidden dimensions. Consider using gradient checkpointing.
 
-### Getting Help
+**Training too slow:**
+Reduce GRADIENT_STEPS, increase UPDATE_EVERY, or use a smaller ensemble. Profile to identify bottleneck.
 
-- Check the error messages - they're designed to be informative
-- Reduce complexity (smaller networks, fewer episodes) to isolate issues
-- Enable debug mode by reducing `LOG_INTERVAL = 1`
-- Check generated figures for training insights
+---
 
-## Theoretical Background
+## Code Structure
 
-### Contraction Theory
+```
+main.py
+    Config                              # All configuration parameters
+    CurriculumStage                     # Stage definition for curriculum
+    
+    EnhancedDynamics                    # Single dynamics model
+    DynamicsEnsemble                    # Ensemble with uncertainty
+    
+    AttentionBasedMetric                # Metric with self-attention
+    RobustContractionMetric             # Standard metric network
+    
+    EnhancedPolicyNetwork               # Gaussian policy
+    EnhancedValueNetwork                # Double Q-network
+    
+    PrioritizedReplayBuffer             # PER implementation
+    AdaptiveExploration                 # Multi-strategy noise
+    
+    EnhancedRiemannianOperations        # Metric computations
+        compute_energy                  # E = x^T M x
+        condition_metric                # Bounded condition number
+        compute_geodesic_regularization # Metric smoothness
+        compute_contraction_loss        # Energy-based loss
+        generate_displacements          # Virtual perturbations
+        compute_safety_margin           # Distance to boundary
+    
+    CurriculumScheduler                 # Stage-based progression
+    MetaLearningController              # Adaptive alpha tuning
+    
+    EnhancedContractionDynamicsAgent    # Main agent class
+        _initialize_networks            # Build all models
+        _initialize_optimizers          # Setup optimizers
+        select_action                   # Action selection
+        update_dynamics                 # Train dynamics model
+        update_metric                   # Train metric network
+        update_critic                   # Train Q-networks
+        update_policy                   # Train policy
+        train_step                      # Single update cycle
+        train_episode                   # One episode execution
+        train                           # Main training loop
+        evaluate                        # Deterministic evaluation
+        save_models / load_models       # Checkpointing
+        plot_training_results           # Visualization
+```
 
-For a dynamical system:
-\[
-x_{t+1} = f(x_t, u_t)
-\]
+---
 
-We learn a contraction metric \(M(x)\) satisfying:
-\[
-A(x)^T M(x_{t+1}) A(x) \preceq (1 - \beta) M(x_t)
-\]
+## Dependencies
 
-where:
-- \(A(x) = \frac{\partial f}{\partial x}\) is the Jacobian
-- \(M(x)\) is a positive-definite Riemannian metric
-- \(\beta \in (0, 1)\) is the contraction rate
+- Python 3.8+
+- PyTorch 2.0+
+- NumPy
+- Gymnasium
+- Matplotlib
+- Standard library: collections, random, pickle, json, os, pathlib, time, dataclasses, typing
 
-### Why This Matters
-
-1. **Exponential Convergence**: All trajectories converge exponentially
-2. **Robustness**: Small perturbations don't cause divergence
-3. **Global Stability**: Works without linearization or local approximations
-4. **Compositionality**: Multiple contracting systems compose to a contracting system
-
-## Contributing
-
-We welcome contributions! Here are areas where you can help:
-
-1. **Additional Environments**: Extend to more complex tasks
-2. **Improved Numerical Stability**: Better handling of ill-conditioned metrics
-3. **Distributed Training**: Multi-GPU support
-4. **Real-World Deployment**: ROS integration, hardware tests
-5. **Theoretical Extensions**: Partial observability, stochastic systems
-
-### Contribution Process
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for your changes
-4. Submit a pull request with clear documentation
-5. Include updated figures and analysis
+---
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License. See LICENSE file for details.
 
-## Acknowledgments
+---
 
-- Built on foundational work in contraction theory (Lohmiller & Slotine, 1998)
-- Inspired by Riemannian metrics in control theory
-- Thanks to the open-source RL community (Gymnasium, PyTorch, MuJoCo)
-- Supported by Sirraya Labs Research Division
+
 
 ## Contact
 
-**Author**: Amir Hameed  
-**Email**: amir@sirraya.org  
-**Organization**: Sirraya Labs  
-**Website**: [sirraya.org/research](https://sirraya.org/research)
+**Author:** Amir Hameed  
+**Organization:** Sirraya Labs  
+**Email:** amir@sirraya.org
 
-For questions, collaborations, or reporting issues:
-- Open a [GitHub Issue](https://github.com/sirraya-labs/CDM/issues)
-- Email: research@sirraya.org
-- Twitter: [@SirrayaLabs](https://twitter.com/SirrayaLabs)
+For questions or collaborations, open a GitHub issue or contact directly.
 
+---
+
+*This is a research prototype at the hypothesis-testing phase. Claims of effectiveness are pending rigorous empirical validation and baseline comparisons. Contributions, critiques, and collaborations are welcome.*
+```

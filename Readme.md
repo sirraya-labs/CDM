@@ -114,7 +114,7 @@ python ablation_study.py
 # - Complete metrics in ablation_results/
 ```
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 CDM/
@@ -152,7 +152,7 @@ CDM/
     └── final_results.pkl        # Complete dataset
 ```
 
-## 🧠 Core Components
+## Core Components
 
 ### 1. **Dynamics Ensemble** (`DynamicsEnsemble`)
 ```python
@@ -195,7 +195,7 @@ contraction_loss = EnhancedRiemannianOperations.compute_contraction_loss(
 )
 ```
 
-## 📊 Ablation Variants
+## Ablation Variants
 
 The framework includes 5 core ablation variants for systematic analysis:
 
@@ -210,7 +210,7 @@ The framework includes 5 core ablation variants for systematic analysis:
 ![Ablation Results](figures/performance_comparison.png)
 *Figure 7: Performance comparison of different ablation variants. Full CDM shows the best stability-performance tradeoff.*
 
-## 🚀 Training Workflow
+## Training Workflow
 
 ### Phase 1: Data Collection
 ```python
@@ -245,7 +245,7 @@ else:
     beta *= 1.02   # Increase stability focus
 ```
 
-## 📈 Performance Results
+## Performance Results
 
 ### HalfCheetah-v4 (200 episodes)
 Based on the experimental run shown in the figures:
@@ -266,7 +266,7 @@ Based on the experimental run shown in the figures:
 ![Loss Convergence](figures/loss_dynamics.png)
 *Figure 9: All loss components converge smoothly, indicating stable training dynamics.*
 
-## 🔬 Key Insights from Experiments
+## Key Insights from Experiments
 
 ### 1. **Stability-Performance Tradeoff**
 - Contraction constraints provide mathematical stability guarantees
@@ -288,7 +288,7 @@ Based on the experimental run shown in the figures:
 - Metric regularization prevents numerical instability
 - Energy levels show appropriate state-space scaling
 
-## 📊 Visualization System
+## Visualization System
 
 The framework generates comprehensive visualizations automatically:
 
@@ -306,7 +306,7 @@ The framework generates comprehensive visualizations automatically:
 - **Comprehensive metrics** covering all aspects of learning
 - **Automatic summary generation** with key statistics
 
-## 🛠️ Advanced Usage
+## Advanced Usage
 
 ### Custom Environments
 
@@ -356,7 +356,7 @@ for seed in seeds:
     all_results.append(results)
 ```
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 ### Common Issues
 
@@ -395,7 +395,7 @@ for seed in seeds:
 - Enable debug mode by reducing `LOG_INTERVAL = 1`
 - Check generated figures for training insights
 
-## 📚 Theoretical Background
+## Theoretical Background
 
 ### Contraction Theory
 
@@ -421,7 +421,7 @@ where:
 3. **Global Stability**: Works without linearization or local approximations
 4. **Compositionality**: Multiple contracting systems compose to a contracting system
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions! Here are areas where you can help:
 
@@ -438,18 +438,18 @@ We welcome contributions! Here are areas where you can help:
 4. Submit a pull request with clear documentation
 5. Include updated figures and analysis
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - Built on foundational work in contraction theory (Lohmiller & Slotine, 1998)
 - Inspired by Riemannian metrics in control theory
 - Thanks to the open-source RL community (Gymnasium, PyTorch, MuJoCo)
 - Supported by Sirraya Labs Research Division
 
-## 📞 Contact
+## Contact
 
 **Author**: Amir Hameed  
 **Email**: amir@sirraya.org  
@@ -461,20 +461,3 @@ For questions, collaborations, or reporting issues:
 - Email: research@sirraya.org
 - Twitter: [@SirrayaLabs](https://twitter.com/SirrayaLabs)
 
----
-
-**⚠️ Research Code Disclaimer**: This is research code. Expect breaking changes, numerical instabilities, and experimental features. Always validate stability claims in your specific application domain.
-
-**✨ If you find this useful for your research, please consider citing our work!**
-```
-
-The key additions to your README include:
-
-1. **Experimental Results Section** - Shows actual training results with the generated figures
-2. **Figure References** - All 6 generated figures are properly referenced with captions
-3. **Quantitative Results** - Includes the actual metrics from your training run
-4. **Visualization System Description** - Explains what each figure shows
-5. **Updated Structure** - Properly integrates figures into the documentation flow
-6. **Figure Placement** - Strategic placement near relevant content sections
-
-The figures are referenced using relative paths (`figures/...`) which will work when the figures are in the `figures/` directory relative to the README.md file. Each figure has a descriptive caption explaining what it shows.

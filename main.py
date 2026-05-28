@@ -3,8 +3,8 @@ Contraction Dynamics Model (CDM): Riemannian Metric Learning for Stable MBRL
 Author: Amir Hameed, Sirraya Labs
 Paper: "Learning Contraction Metrics for Provably Stable Model-Based RL"
 
-ROBUST IMPLEMENTATION: Complete reproducible code with enhanced stability, 
-performance optimization, and comprehensive testing.
+ENHANCED IMPLEMENTATION: With adaptive contraction rates, curriculum learning,
+attention-based metrics, safety constraints, and meta-learning capabilities.
 """
 
 import torch
@@ -22,17 +22,26 @@ import os
 from pathlib import Path
 import warnings
 warnings.filterwarnings('ignore')
-from typing import Tuple, Dict, List, Optional, Any
+from typing import Tuple, Dict, List, Optional, Any, Union
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 
 # ============================
 # ENHANCED CONFIGURATION
 # ============================
 
 @dataclass
+class CurriculumStage:
+    """Curriculum learning stage configuration"""
+    name: str = "stability_focus"
+    beta: float = 2.0
+    duration: int = 50
+    exploration_scale: float = 1.0
+    noise_scale: float = 1.0
+
+@dataclass
 class Config:
-    """Enhanced configuration with robust defaults"""
+    """Enhanced configuration with robust defaults and curriculum learning"""
     # Environment
     ENV_NAME: str = "Pendulum-v1"
     STATE_DIM: int = 3
@@ -44,6 +53,7 @@ class Config:
     POLICY_HIDDEN_DIM: int = 256
     METRIC_HIDDEN_DIM: int = 128
     CRITIC_HIDDEN_DIM: int = 256
+    ATTENTION_HEADS: int = 3  # For attention-based metric
     
     # Training Parameters (optimized)
     TOTAL_EPISODES: int = 200
@@ -52,25 +62,28 @@ class Config:
     TAU: float = 0.005
     
     # Enhanced Contraction Parameters
-    CONTRACTION_RATE_ALPHA: float = 0.85  # Less strict for better learning
-    INITIAL_BETA: float = 0.3  # Higher initial stability focus
+    CONTRACTION_RATE_ALPHA: float = 0.85
+    CONTRACTION_RATE_MIN: float = 0.7
+    CONTRACTION_RATE_MAX: float = 0.95
+    INITIAL_BETA: float = 0.3
     BETA_MIN: float = 0.05
     BETA_MAX: float = 2.0
-    METRIC_REGULARIZATION: float = 0.001  # Reduced for less constraint
-    EPSILON_METRIC: float = 0.05  # Smaller epsilon
-    PERTURBATION_SIGMA: float = 0.02  # Slightly larger for better exploration
+    METRIC_REGULARIZATION: float = 0.001
+    EPSILON_METRIC: float = 0.05
+    PERTURBATION_SIGMA: float = 0.02
+    TARGET_CONDITION_NUMBER: float = 100.0
     
     # Optimized Learning Rates
     ACTOR_LR: float = 3e-4
     CRITIC_LR: float = 3e-4
     DYNAMICS_LR: float = 1e-3
-    METRIC_LR: float = 5e-5  # Slower learning for stability
+    METRIC_LR: float = 5e-5
     
     # Enhanced Optimization
     REPLAY_BUFFER_SIZE: int = 100000
     INITIAL_EXPLORATION_STEPS: int = 5000
     UPDATE_FREQUENCY: int = 1
-    ENSEMBLE_SIZE: int = 7  # Larger ensemble for better uncertainty
+    ENSEMBLE_SIZE: int = 7
     
     # Learning Schedule
     LEARNING_START: int = 1000
@@ -84,10 +97,33 @@ class Config:
     NOISE_DECAY: float = 0.999
     MIN_NOISE: float = 0.1
     
+    # Curriculum Learning
+    USE_CURRICULUM: bool = True
+    CURRICULUM_STAGES: List[CurriculumStage] = field(default_factory=lambda: [
+        CurriculumStage("stability_focus", beta=2.0, duration=50, exploration_scale=1.0, noise_scale=1.0),
+        CurriculumStage("performance_focus", beta=1.0, duration=100, exploration_scale=0.8, noise_scale=0.7),
+        CurriculumStage("fine_tuning", beta=0.3, duration=50, exploration_scale=0.5, noise_scale=0.3)
+    ])
+    
+    # Meta-Learning
+    USE_META_LEARNING: bool = True
+    META_LEARNING_WINDOW: int = 20
+    
+    # Safety Constraints
+    USE_SAFETY_CONSTRAINTS: bool = True
+    SAFETY_MARGIN_THRESHOLD: float = 0.1
+    
+    # Attention Mechanism
+    USE_ATTENTION_METRIC: bool = True
+    
+    # Geodesic Regularization
+    USE_GEODESIC_REGULARIZATION: bool = True
+    GEODESIC_WEIGHT: float = 0.01
+    
     # Experimental Settings
     SEED: int = 42
     DEVICE: str = "cuda" if torch.cuda.is_available() else "cpu"
-    SAVE_DIR: str = "cdm_robust_results"
+    SAVE_DIR: str = "cdm_enhanced_results"
     LOG_INTERVAL: int = 5
     EVAL_INTERVAL: int = 20
     EVAL_EPISODES: int = 5
@@ -101,22 +137,41 @@ class Config:
     REWARD_SCALE: float = 0.1
     STATE_NORMALIZATION: bool = True
     
+    # Performance Optimization
+    USE_JIT: bool = False  # JIT compilation (experimental)
+    USE_AMP: bool = False  # Automatic Mixed Precision
+    NUM_PARALLEL_ENVS: int = 1  # Parallel environments
+    
     def __post_init__(self):
         """Validate configuration"""
         assert 0 < self.CONTRACTION_RATE_ALPHA < 1
         assert self.BATCH_SIZE <= self.REPLAY_BUFFER_SIZE
         assert self.ENSEMBLE_SIZE >= 3
+        if self.USE_ATTENTION_METRIC:
+            assert self.ATTENTION_HEADS <= self.STATE_DIM
     
     def save(self, path: Path):
         """Save configuration to file"""
         with open(path, 'w') as f:
-            json.dump(asdict(self), f, indent=2)
+            config_dict = asdict(self)
+            # Convert CurriculumStage objects to dicts
+            config_dict['CURRICULUM_STAGES'] = [
+                asdict(stage) for stage in self.CURRICULUM_STAGES
+            ]
+            json.dump(config_dict, f, indent=2)
     
     @classmethod
     def load(cls, path: Path):
         """Load configuration from file"""
         with open(path, 'r') as f:
             data = json.load(f)
+        
+        # Convert curriculum stages back to objects
+        if 'CURRICULUM_STAGES' in data:
+            data['CURRICULUM_STAGES'] = [
+                CurriculumStage(**stage) for stage in data['CURRICULUM_STAGES']
+            ]
+        
         return cls(**data)
 
 # ============================
@@ -225,6 +280,230 @@ class DynamicsEnsemble(nn.Module):
         """Sample a random model from ensemble for exploration"""
         return random.choice(self.models)
 
+class AttentionBasedMetric(nn.Module):
+    """
+    Metric network with attention mechanism for state-dependent importance
+    """
+    def __init__(self, state_dim: int, hidden_dim: int = 128, 
+                 num_heads: int = 3, epsilon: float = 0.05):
+        super().__init__()
+        self.state_dim = state_dim
+        self.epsilon = epsilon
+        
+        # Number of parameters for lower triangular matrix
+        self.output_dim = (state_dim * (state_dim + 1)) // 2
+        
+        # Ensure num_heads is valid
+        self.num_heads = min(num_heads, state_dim)
+        
+        # Self-attention for state features (only if state_dim >= num_heads)
+        if state_dim >= self.num_heads:
+            self.attention = nn.MultiheadAttention(
+                embed_dim=state_dim,
+                num_heads=self.num_heads,
+                batch_first=True
+            )
+            self.use_attention = True
+        else:
+            self.use_attention = False
+        
+        # Enhanced network architecture
+        self.net = nn.Sequential(
+            nn.Linear(state_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(hidden_dim, self.output_dim)
+        )
+        
+        # Learnable temperature for attention
+        if self.use_attention:
+            self.temperature = nn.Parameter(torch.ones(1))
+        
+        # Softplus for diagonal entries
+        self.softplus = nn.Softplus(beta=1.0, threshold=20)
+        
+        # For numerical stability
+        self.diagonal_offset = 0.01
+        self.off_diagonal_scale = 0.1
+        
+        self.apply(self._init_weights)
+    
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            nn.init.orthogonal_(module.weight, gain=0.1)
+            nn.init.constant_(module.bias, 0.0)
+    
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        batch_size = x.shape[0]
+        
+        # Apply self-attention if enabled
+        if self.use_attention:
+            x_expanded = x.unsqueeze(1)  # Add sequence dimension [batch, 1, state_dim]
+            attended, _ = self.attention(x_expanded, x_expanded, x_expanded)
+            x_enhanced = (x + attended.squeeze(1)) * self.temperature
+        else:
+            x_enhanced = x
+        
+        # Get raw parameters
+        l_params = self.net(x_enhanced)
+        
+        # Build lower triangular matrix L with enhanced stability
+        L = torch.zeros(batch_size, self.state_dim, self.state_dim, 
+                       device=x.device, dtype=x.dtype)
+        
+        idx = 0
+        for i in range(self.state_dim):
+            for j in range(i + 1):
+                val = l_params[:, idx]
+                if i == j:
+                    # Diagonal: positive with lower bound
+                    L[:, i, j] = self.softplus(val) + self.diagonal_offset
+                else:
+                    # Off-diagonal: bounded for stability
+                    L[:, i, j] = torch.tanh(val) * self.off_diagonal_scale
+                idx += 1
+        
+        # Compute M = LL^T + εI with numerical safeguards
+        LLT = torch.bmm(L, L.transpose(1, 2))
+        identity = torch.eye(self.state_dim, device=x.device, dtype=x.dtype)
+        identity = identity.unsqueeze(0).expand(batch_size, -1, -1)
+        
+        M = LLT + self.epsilon * identity
+        
+        # Ensure positive definiteness via Cholesky decomposition
+        try:
+            torch.linalg.cholesky(M)
+        except RuntimeError:
+            # Add damping if not positive definite
+            M = M + 0.1 * identity
+        
+        return M, L
+    
+    def compute_metrics(self, M: torch.Tensor) -> Dict[str, torch.Tensor]:
+        """Compute additional metrics for monitoring"""
+        batch_size = M.shape[0]
+        metrics = {}
+        
+        # Eigenvalues for condition number
+        eigenvalues = torch.linalg.eigvalsh(M)
+        
+        # Extract min and max eigenvalues across batch
+        min_eigenvalues = eigenvalues.min(dim=1).values
+        max_eigenvalues = eigenvalues.max(dim=1).values
+        
+        metrics['min_eigenvalue'] = min_eigenvalues.mean()
+        metrics['max_eigenvalue'] = max_eigenvalues.mean()
+        metrics['condition_number'] = (max_eigenvalues / torch.clamp(min_eigenvalues, min=1e-6)).mean()
+        
+        # Determinant
+        metrics['det'] = torch.det(M).mean()
+        
+        return metrics
+
+class RobustContractionMetric(nn.Module):
+    """
+    Robust Riemannian metric with enhanced numerical stability
+    M(x) = L(x)L(x)^T + εI
+    """
+    def __init__(self, state_dim: int, hidden_dim: int = 128, epsilon: float = 0.05):
+        super().__init__()
+        self.state_dim = state_dim
+        self.epsilon = epsilon
+        
+        # Number of parameters for lower triangular matrix
+        self.output_dim = (state_dim * (state_dim + 1)) // 2
+        
+        # Enhanced network architecture
+        self.net = nn.Sequential(
+            nn.Linear(state_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(hidden_dim, self.output_dim)
+        )
+        
+        # Softplus for diagonal entries
+        self.softplus = nn.Softplus(beta=1.0, threshold=20)
+        
+        # For numerical stability
+        self.diagonal_offset = 0.01
+        self.off_diagonal_scale = 0.1
+        
+        self.apply(self._init_weights)
+    
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            nn.init.orthogonal_(module.weight, gain=0.1)
+            nn.init.constant_(module.bias, 0.0)
+    
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        batch_size = x.shape[0]
+        
+        # Get raw parameters
+        l_params = self.net(x)
+        
+        # Build lower triangular matrix L with enhanced stability
+        L = torch.zeros(batch_size, self.state_dim, self.state_dim, 
+                       device=x.device, dtype=x.dtype)
+        
+        idx = 0
+        for i in range(self.state_dim):
+            for j in range(i + 1):
+                val = l_params[:, idx]
+                if i == j:
+                    # Diagonal: positive with lower bound
+                    L[:, i, j] = self.softplus(val) + self.diagonal_offset
+                else:
+                    # Off-diagonal: bounded for stability
+                    L[:, i, j] = torch.tanh(val) * self.off_diagonal_scale
+                idx += 1
+        
+        # Compute M = LL^T + εI with numerical safeguards
+        LLT = torch.bmm(L, L.transpose(1, 2))
+        identity = torch.eye(self.state_dim, device=x.device, dtype=x.dtype)
+        identity = identity.unsqueeze(0).expand(batch_size, -1, -1)
+        
+        M = LLT + self.epsilon * identity
+        
+        # Ensure positive definiteness via Cholesky decomposition
+        try:
+            torch.linalg.cholesky(M)
+        except RuntimeError:
+            # Add damping if not positive definite
+            M = M + 0.1 * identity
+        
+        return M, L
+    
+    def compute_metrics(self, M: torch.Tensor) -> Dict[str, torch.Tensor]:
+        """Compute additional metrics for monitoring"""
+        batch_size = M.shape[0]
+        metrics = {}
+        
+        # Eigenvalues for condition number
+        eigenvalues = torch.linalg.eigvalsh(M)
+        
+        # Extract min and max eigenvalues across batch
+        min_eigenvalues = eigenvalues.min(dim=1).values
+        max_eigenvalues = eigenvalues.max(dim=1).values
+        
+        metrics['min_eigenvalue'] = min_eigenvalues.mean()
+        metrics['max_eigenvalue'] = max_eigenvalues.mean()
+        metrics['condition_number'] = (max_eigenvalues / torch.clamp(min_eigenvalues, min=1e-6)).mean()
+        
+        # Determinant
+        metrics['det'] = torch.det(M).mean()
+        
+        return metrics
+
 class EnhancedPolicyNetwork(nn.Module):
     """Enhanced policy network with adaptive exploration"""
     def __init__(self, state_dim: int, action_dim: int, hidden_dim: int = 256):
@@ -322,114 +601,15 @@ class EnhancedValueNetwork(nn.Module):
         q1, q2 = self(state)
         return torch.min(q1, q2)
 
-class RobustContractionMetric(nn.Module):
-    """
-    Robust Riemannian metric with enhanced numerical stability
-    M(x) = L(x)L(x)^T + εI
-    """
-    def __init__(self, state_dim: int, hidden_dim: int = 128, epsilon: float = 0.05):
-        super().__init__()
-        self.state_dim = state_dim
-        self.epsilon = epsilon
-        
-        # Number of parameters for lower triangular matrix
-        self.output_dim = (state_dim * (state_dim + 1)) // 2
-        
-        # Enhanced network architecture
-        self.net = nn.Sequential(
-            nn.Linear(state_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(hidden_dim, self.output_dim)
-        )
-        
-        # Softplus for diagonal entries
-        self.softplus = nn.Softplus(beta=1.0, threshold=20)
-        
-        # For numerical stability
-        self.diagonal_offset = 0.01
-        self.off_diagonal_scale = 0.1
-        
-        self.apply(self._init_weights)
-    
-    def _init_weights(self, module):
-        if isinstance(module, nn.Linear):
-            nn.init.orthogonal_(module.weight, gain=0.1)  # Small gain for stability
-            nn.init.constant_(module.bias, 0.0)
-    
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        batch_size = x.shape[0]
-        
-        # Get raw parameters
-        l_params = self.net(x)
-        
-        # Build lower triangular matrix L with enhanced stability
-        L = torch.zeros(batch_size, self.state_dim, self.state_dim, 
-                       device=x.device, dtype=x.dtype)
-        
-        idx = 0
-        for i in range(self.state_dim):
-            for j in range(i + 1):
-                val = l_params[:, idx]
-                if i == j:
-                    # Diagonal: positive with lower bound
-                    L[:, i, j] = self.softplus(val) + self.diagonal_offset
-                else:
-                    # Off-diagonal: bounded for stability
-                    L[:, i, j] = torch.tanh(val) * self.off_diagonal_scale
-                idx += 1
-        
-        # Compute M = LL^T + εI with numerical safeguards
-        LLT = torch.bmm(L, L.transpose(1, 2))
-        identity = torch.eye(self.state_dim, device=x.device, dtype=x.dtype)
-        identity = identity.unsqueeze(0).expand(batch_size, -1, -1)
-        
-        M = LLT + self.epsilon * identity
-        
-        # Ensure positive definiteness via Cholesky decomposition
-        try:
-            torch.linalg.cholesky(M)  # Just check, don't store
-        except RuntimeError:
-            # Add damping if not positive definite
-            M = M + 0.1 * identity
-        
-        return M, L
-    
-    def compute_metrics(self, M: torch.Tensor) -> Dict[str, torch.Tensor]:
-        """Compute additional metrics for monitoring"""
-        batch_size = M.shape[0]
-        metrics = {}
-        
-        # Eigenvalues for condition number
-        eigenvalues = torch.linalg.eigvalsh(M)  # Real symmetric
-        
-        # Extract min and max eigenvalues across batch
-        min_eigenvalues = eigenvalues.min(dim=1).values  # [batch]
-        max_eigenvalues = eigenvalues.max(dim=1).values  # [batch]
-        
-        metrics['min_eigenvalue'] = min_eigenvalues.mean()
-        metrics['max_eigenvalue'] = max_eigenvalues.mean()
-        metrics['condition_number'] = (max_eigenvalues / torch.clamp(min_eigenvalues, min=1e-6)).mean()
-        
-        # Determinant
-        metrics['det'] = torch.det(M).mean()
-        
-        return metrics
-
 # ============================
 # ENHANCED RIEMANNIAN OPERATIONS
 # ============================
 
 class EnhancedRiemannianOperations:
-    """Enhanced Riemannian operations with numerical stability"""
+    """Enhanced Riemannian operations with numerical stability and geodesic regularization"""
     
     @staticmethod
-    def compute_energy(state: torch.Tensor, metric_net: RobustContractionMetric) -> Tuple[torch.Tensor, torch.Tensor]:
+    def compute_energy(state: torch.Tensor, metric_net: Union[RobustContractionMetric, AttentionBasedMetric]) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Compute energy E = x^T M(x) x with numerical stability
         """
@@ -455,15 +635,73 @@ class EnhancedRiemannianOperations:
         return energy, M
     
     @staticmethod
+    def condition_metric(M: torch.Tensor, target_condition_number: float = 100.0) -> torch.Tensor:
+        """
+        Ensure metric matrix has bounded condition number
+        """
+        batch_size = M.shape[0]
+        
+        # Compute eigendecomposition
+        eigenvalues, eigenvectors = torch.linalg.eigh(M)
+        
+        # Clamp eigenvalues to bound condition number
+        max_eigenvalues = eigenvalues.max(dim=1, keepdim=True).values
+        min_eigenvalues = max_eigenvalues / target_condition_number
+        
+        eigenvalues = torch.clamp(eigenvalues, 
+                                min=min_eigenvalues,
+                                max=max_eigenvalues)
+        
+        # Reconstruct matrix with bounded condition number
+        M_conditioned = torch.bmm(
+            eigenvectors,
+            torch.bmm(torch.diag_embed(eigenvalues), 
+                     eigenvectors.transpose(1, 2))
+        )
+        
+        return M_conditioned
+    
+    @staticmethod
+    def compute_geodesic_regularization(states: torch.Tensor, 
+                                       metric_net: Union[RobustContractionMetric, AttentionBasedMetric]) -> torch.Tensor:
+        """
+        Additional regularization to ensure smooth metric variation
+        along geodesic paths in state space
+        """
+        num_interp = 5
+        directions = torch.randn_like(states)
+        directions = directions / (directions.norm(dim=1, keepdim=True) + 1e-8)
+        
+        interp_points = []
+        for t in torch.linspace(0, 1, num_interp, device=states.device):
+            interp_points.append(states + t * directions * 0.1)
+        
+        interp_tensor = torch.cat(interp_points, dim=0)
+        
+        # Compute metric variation along path
+        M_interp, _ = metric_net(interp_tensor)
+        
+        # Penalize rapid changes in metric
+        metric_diffs = []
+        for i in range(num_interp - 1):
+            diff = M_interp[i::num_interp] - M_interp[(i+1)::num_interp]
+            metric_diffs.append(torch.norm(diff, dim=(1,2)))
+        
+        geodesic_loss = torch.cat(metric_diffs).mean()
+        return geodesic_loss
+    
+    @staticmethod
     def compute_contraction_loss(
         states: torch.Tensor, 
         next_states: torch.Tensor,
-        metric_net: RobustContractionMetric,
+        metric_net: Union[RobustContractionMetric, AttentionBasedMetric],
         alpha: float = 0.85,
-        beta: float = 1.0  # Temperature parameter
+        beta: float = 1.0,
+        use_geodesic_reg: bool = False,
+        geodesic_weight: float = 0.01
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         """
-        Enhanced contraction loss with smooth penalty
+        Enhanced contraction loss with smooth penalty and geodesic regularization
         """
         energy_curr, M_curr = EnhancedRiemannianOperations.compute_energy(states, metric_net)
         energy_next, M_next = EnhancedRiemannianOperations.compute_energy(next_states, metric_net)
@@ -480,9 +718,12 @@ class EnhancedRiemannianOperations:
         identity = identity.unsqueeze(0).expand_as(M_curr)
         identity_loss = torch.norm(M_curr - identity, dim=(1, 2)).mean()
         
-        # REMOVED gradient penalty for now - it's causing dimension issues
-        
-        smoothness_loss = torch.tensor(0.0, device=states.device)
+        # Geodesic regularization
+        geodesic_loss = torch.tensor(0.0, device=states.device)
+        if use_geodesic_reg:
+            geodesic_loss = EnhancedRiemannianOperations.compute_geodesic_regularization(
+                states, metric_net
+            )
         
         metrics = {
             'energy_curr': energy_curr.mean(),
@@ -490,12 +731,13 @@ class EnhancedRiemannianOperations:
             'energy_diff': energy_diff.mean(),
             'symmetry_loss': symmetry_loss,
             'identity_loss': identity_loss,
-            'smoothness_loss': smoothness_loss
+            'geodesic_loss': geodesic_loss
         }
         
         total_loss = (contraction_loss + 
                      0.01 * symmetry_loss + 
-                     0.001 * identity_loss)
+                     0.001 * identity_loss +
+                     geodesic_weight * geodesic_loss)
         
         return total_loss, metrics
     
@@ -522,6 +764,30 @@ class EnhancedRiemannianOperations:
             perturbations_list.append(perturbations)
         
         return perturbed_states_list, perturbations_list
+    
+    @staticmethod
+    def compute_safety_margin(state: torch.Tensor, 
+                             metric_net: Union[RobustContractionMetric, AttentionBasedMetric]) -> torch.Tensor:
+        """
+        Compute safety margin using contraction metric
+        """
+        M, _ = metric_net(state)
+        
+        # For Pendulum-v1: safe region when angle is within ±π/2
+        theta = state[:, 0]  # Angle
+        safe_region = torch.cos(theta)  # Positive when within safe bounds
+        
+        # Compute distance in metric
+        state_expanded = state.unsqueeze(1)
+        distance = torch.sqrt(
+            torch.abs(torch.bmm(state_expanded, 
+                              torch.bmm(M, state_expanded.transpose(1, 2))))
+        ).squeeze()
+        
+        # Safety margin combines geometric distance and region
+        safety_margin = distance * torch.clamp(safe_region, min=0)
+        
+        return safety_margin
 
 # ============================
 # ENHANCED REPLAY BUFFER
@@ -559,7 +825,7 @@ class PrioritizedReplayBuffer:
         self.position = (self.position + 1) % self.capacity
         self.size = min(self.size + 1, self.capacity)
     
-    def sample(self, batch_size: int) -> Tuple:
+    def sample(self, batch_size: int) -> Optional[Tuple]:
         """Sample batch with priorities"""
         if self.size < batch_size:
             return None
@@ -627,6 +893,130 @@ class PrioritizedReplayBuffer:
         self._max_priority = data['max_priority']
 
 # ============================
+# CURRICULUM LEARNING SCHEDULER
+# ============================
+
+class CurriculumScheduler:
+    """Progressive difficulty scheduler for stability learning"""
+    
+    def __init__(self, config: Config):
+        self.config = config
+        self.current_stage = 0
+        self.stages = config.CURRICULUM_STAGES
+        self.episodes_in_stage = 0
+        self.enabled = config.USE_CURRICULUM
+    
+    def get_parameters(self, episode: int) -> Dict:
+        """Get curriculum parameters for current stage"""
+        if not self.enabled:
+            return {
+                'beta': self.config.INITIAL_BETA,
+                'exploration_scale': 1.0,
+                'noise_scale': 1.0
+            }
+        
+        if self.episodes_in_stage >= self.stages[self.current_stage].duration:
+            if self.current_stage < len(self.stages) - 1:
+                self.current_stage += 1
+                self.episodes_in_stage = 0
+                print(f"  🎓 Advancing to curriculum stage: {self.stages[self.current_stage].name}")
+        
+        self.episodes_in_stage += 1
+        
+        stage = self.stages[self.current_stage]
+        
+        # Smooth interpolation between stages
+        if self.current_stage < len(self.stages) - 1:
+            next_stage = self.stages[self.current_stage + 1]
+            progress = self.episodes_in_stage / max(stage.duration, 1)
+            
+            beta = stage.beta + (next_stage.beta - stage.beta) * progress
+            exploration = stage.exploration_scale + (next_stage.exploration_scale - stage.exploration_scale) * progress
+            noise = stage.noise_scale + (next_stage.noise_scale - stage.noise_scale) * progress
+        else:
+            beta = stage.beta
+            exploration = stage.exploration_scale
+            noise = stage.noise_scale
+        
+        return {
+            'beta': beta,
+            'exploration_scale': exploration,
+            'noise_scale': noise
+        }
+
+# ============================
+# META-LEARNING CONTROLLER
+# ============================
+
+class MetaLearningController:
+    """Meta-controller for adaptive hyperparameter tuning"""
+    
+    def __init__(self, config: Config):
+        self.config = config
+        self.enabled = config.USE_META_LEARNING
+        self.performance_history = deque(maxlen=config.META_LEARNING_WINDOW)
+        self.energy_history = deque(maxlen=config.META_LEARNING_WINDOW)
+        self.contraction_rate_history = deque(maxlen=config.META_LEARNING_WINDOW)
+    
+    def update(self, reward: float, energy: float):
+        """Update meta-learning with new data"""
+        self.performance_history.append(reward)
+        self.energy_history.append(energy)
+    
+    def suggest_contraction_rate(self) -> float:
+        """Suggest new contraction rate based on performance"""
+        if not self.enabled or len(self.energy_history) < 10:
+            return self.config.CONTRACTION_RATE_ALPHA
+        
+        # Compute energy trend
+        energy_array = np.array(list(self.energy_history))
+        if len(energy_array) >= 2:
+            energy_trend = np.polyfit(range(len(energy_array)), energy_array, 1)[0]
+        else:
+            energy_trend = 0
+        
+        alpha = self.config.CONTRACTION_RATE_ALPHA
+        
+        if energy_trend > 0:  # Energy increasing (instability)
+            # Tighten contraction
+            alpha *= 0.98
+        else:  # Energy decreasing (stabilizing)
+            # Relax contraction for better performance
+            alpha *= 1.01
+        
+        # Clip to valid range
+        alpha = np.clip(alpha, self.config.CONTRACTION_RATE_MIN, self.config.CONTRACTION_RATE_MAX)
+        
+        self.contraction_rate_history.append(alpha)
+        self.config.CONTRACTION_RATE_ALPHA = alpha
+        
+        return alpha
+    
+    def suggest_hyperparameters(self, current_metrics: Dict) -> Dict:
+        """Suggest new hyperparameters based on performance"""
+        if not self.enabled or len(self.performance_history) < 5:
+            return {}
+        
+        adjustments = {}
+        
+        # Compute performance trend
+        reward_array = np.array(list(self.performance_history))
+        if len(reward_array) >= 2:
+            reward_trend = np.polyfit(range(len(reward_array)), reward_array, 1)[0]
+        else:
+            reward_trend = 0
+        
+        # Adjust learning rates based on loss trends
+        if current_metrics.get('critic_loss', 0) > 1.0:
+            adjustments['CRITIC_LR'] = max(1e-5, self.config.CRITIC_LR * 0.9)
+        
+        # Adjust contraction rate
+        if reward_trend < 0:  # Performance declining
+            self.suggest_contraction_rate()
+        
+        return adjustments
+
+# ============================
 # ENHANCED EXPLORATION STRATEGY
 # ============================
 
@@ -680,7 +1070,7 @@ class AdaptiveExploration:
             'adaptation_rate': 1.01
         }
     
-    def sample(self, strategy: str = None) -> np.ndarray:
+    def sample(self, strategy: str = None, scale: float = 1.0) -> np.ndarray:
         """Sample noise from selected strategy"""
         if strategy is None:
             # Select strategy based on success rates
@@ -712,8 +1102,8 @@ class AdaptiveExploration:
         else:
             noise = np.zeros(self.action_dim)
         
-        # Scale by current exploration rate
-        noise *= self.exploration_rate
+        # Scale by current exploration rate and curriculum scale
+        noise *= self.exploration_rate * scale
         
         return noise
     
@@ -755,9 +1145,10 @@ class AdaptiveExploration:
 # ENHANCED CDM AGENT
 # ============================
 
-class RobustContractionDynamicsAgent:
+class EnhancedContractionDynamicsAgent:
     """
-    Robust CDM agent with enhanced stability and performance
+    Enhanced CDM agent with curriculum learning, meta-learning,
+    attention-based metrics, and safety constraints
     """
     
     def __init__(self, config: Config):
@@ -780,9 +1171,19 @@ class RobustContractionDynamicsAgent:
         # Enhanced exploration
         self.exploration = AdaptiveExploration(config.ACTION_DIM, config)
         
+        # Curriculum learning
+        self.curriculum = CurriculumScheduler(config)
+        
+        # Meta-learning controller
+        self.meta_controller = MetaLearningController(config)
+        
         # Adaptive stability weight
         self.beta = config.INITIAL_BETA
         self.beta_history = []
+        
+        # Adaptive contraction rate
+        self.contraction_alpha = config.CONTRACTION_RATE_ALPHA
+        self.contraction_alpha_history = []
         
         # Normalization
         self.state_mean = np.zeros(config.STATE_DIM)
@@ -799,8 +1200,12 @@ class RobustContractionDynamicsAgent:
             'actor_losses': [],
             'energies': [],
             'betas': [],
+            'contraction_alphas': [],
             'exploration_rates': [],
-            'grad_norms': defaultdict(list)
+            'safety_margins': [],
+            'grad_norms': defaultdict(list),
+            'curriculum_stages': [],
+            'geodesic_losses': []
         }
         
         # Create save directory
@@ -810,8 +1215,14 @@ class RobustContractionDynamicsAgent:
         # Save config
         config.save(self.save_dir / "config.json")
         
-        print(f"Robust CDM Agent initialized on {self.device}")
+        print(f"Enhanced CDM Agent initialized on {self.device}")
         print(f"Save directory: {self.save_dir}")
+        print(f"Features enabled:")
+        print(f"  - Curriculum Learning: {config.USE_CURRICULUM}")
+        print(f"  - Meta-Learning: {config.USE_META_LEARNING}")
+        print(f"  - Attention Metric: {config.USE_ATTENTION_METRIC}")
+        print(f"  - Safety Constraints: {config.USE_SAFETY_CONSTRAINTS}")
+        print(f"  - Geodesic Regularization: {config.USE_GEODESIC_REGULARIZATION}")
         print(f"Network parameters:")
         print(f"  Dynamics: {sum(p.numel() for p in self.dynamics.parameters()):,}")
         print(f"  Policy: {sum(p.numel() for p in self.policy.parameters()):,}")
@@ -846,12 +1257,20 @@ class RobustContractionDynamicsAgent:
         ).to(self.device)
         self.target_critic.load_state_dict(self.critic.state_dict())
         
-        # Contraction metric network
-        self.metric_net = RobustContractionMetric(
-            self.config.STATE_DIM,
-            self.config.METRIC_HIDDEN_DIM,
-            epsilon=self.config.EPSILON_METRIC
-        ).to(self.device)
+        # Contraction metric network (attention-based or standard)
+        if self.config.USE_ATTENTION_METRIC:
+            self.metric_net = AttentionBasedMetric(
+                self.config.STATE_DIM,
+                self.config.METRIC_HIDDEN_DIM,
+                num_heads=self.config.ATTENTION_HEADS,
+                epsilon=self.config.EPSILON_METRIC
+            ).to(self.device)
+        else:
+            self.metric_net = RobustContractionMetric(
+                self.config.STATE_DIM,
+                self.config.METRIC_HIDDEN_DIM,
+                epsilon=self.config.EPSILON_METRIC
+            ).to(self.device)
         
         # Target networks
         self.target_policy = EnhancedPolicyNetwork(
@@ -933,7 +1352,7 @@ class RobustContractionDynamicsAgent:
         self.beta_history.append(self.beta)
     
     def select_action(self, state: np.ndarray, deterministic: bool = False,
-                     use_exploration: bool = True) -> np.ndarray:
+                     use_exploration: bool = True, curriculum_scale: float = 1.0) -> np.ndarray:
         """Select action with enhanced exploration"""
         state_normalized = self.normalize_state(state)
         state_tensor = torch.FloatTensor(state_normalized).unsqueeze(0).to(self.device)
@@ -948,15 +1367,27 @@ class RobustContractionDynamicsAgent:
                 action = action_dist.sample()
                 action_np = action.cpu().numpy()[0]
             
-            # Add exploration noise
+            # Add exploration noise with curriculum scaling
             if use_exploration:
-                noise = self.exploration.sample()
+                noise = self.exploration.sample(scale=curriculum_scale)
                 action_np += noise
             
             # Clip to valid range
             action_np = np.clip(action_np, -self.policy.action_scale, self.policy.action_scale)
             
             return action_np
+    
+    def compute_safety_margin(self, state: torch.Tensor) -> torch.Tensor:
+        """Compute safety margin for current state"""
+        if not self.config.USE_SAFETY_CONSTRAINTS:
+            return torch.zeros(state.shape[0], device=state.device)
+        
+        with torch.no_grad():
+            safety_margin = EnhancedRiemannianOperations.compute_safety_margin(
+                state, self.metric_net
+            )
+        
+        return safety_margin
     
     def update_dynamics(self, batch: Tuple, step: int) -> Tuple[float, Dict]:
         """Update dynamics model with uncertainty weighting"""
@@ -1003,7 +1434,7 @@ class RobustContractionDynamicsAgent:
         return dynamics_loss.item(), metrics
     
     def update_metric(self, batch: Tuple, step: int) -> Tuple[float, Dict]:
-        """Update contraction metric with enhanced stability"""
+        """Update contraction metric with enhanced stability and geodesic regularization"""
         states, actions, _, _, _, _, weights = batch
         
         # Convert to tensors
@@ -1030,12 +1461,14 @@ class RobustContractionDynamicsAgent:
                 next_pred, _ = self.dynamics(perturbed_states, actions_sampled)
                 next_perturbed_preds.append(next_pred)
         
-        # Compute contraction loss with temperature scheduling
+        # Compute contraction loss with temperature scheduling and geodesic regularization
         temperature = max(0.1, 1.0 - step / 10000)  # Anneal temperature
         metric_loss, metric_metrics = EnhancedRiemannianOperations.compute_contraction_loss(
             states_t, next_states_pred, self.metric_net,
-            alpha=self.config.CONTRACTION_RATE_ALPHA,
-            beta=temperature
+            alpha=self.contraction_alpha,
+            beta=temperature,
+            use_geodesic_reg=self.config.USE_GEODESIC_REGULARIZATION,
+            geodesic_weight=self.config.GEODESIC_WEIGHT
         )
         
         # Weight the loss
@@ -1046,7 +1479,7 @@ class RobustContractionDynamicsAgent:
         for next_perturbed in next_perturbed_preds:
             _, metrics_perturbed = EnhancedRiemannianOperations.compute_contraction_loss(
                 states_t, next_perturbed, self.metric_net,
-                alpha=self.config.CONTRACTION_RATE_ALPHA
+                alpha=self.contraction_alpha
             )
             consistency_loss += metrics_perturbed['energy_diff'].abs().mean()
         
@@ -1065,6 +1498,13 @@ class RobustContractionDynamicsAgent:
         with torch.no_grad():
             M, _ = self.metric_net(states_t)
             metric_net_metrics = self.metric_net.compute_metrics(M)
+            
+            # Compute safety margins if enabled
+            if self.config.USE_SAFETY_CONSTRAINTS:
+                safety_margin = EnhancedRiemannianOperations.compute_safety_margin(
+                    states_t, self.metric_net
+                )
+                metric_net_metrics['safety_margin'] = safety_margin.mean()
         
         metrics = {
             'metric_loss': metric_loss.item(),
@@ -1072,16 +1512,16 @@ class RobustContractionDynamicsAgent:
             'energy_curr': metric_metrics['energy_curr'].item(),
             'energy_next': metric_metrics['energy_next'].item(),
             'energy_diff': metric_metrics['energy_diff'].item(),
+            'geodesic_loss': metric_metrics.get('geodesic_loss', torch.tensor(0.0)).item(),
             'grad_norm': grad_norm.item(),
         }
         
         # Add metric network metrics safely
         for k, v in metric_net_metrics.items():
             if torch.is_tensor(v):
-                if v.numel() == 1:  # Scalar tensor
+                if v.numel() == 1:
                     metrics[k] = v.item()
                 else:
-                    # For batched metrics, take mean
                     metrics[k] = v.mean().item()
             else:
                 metrics[k] = v
@@ -1149,7 +1589,7 @@ class RobustContractionDynamicsAgent:
         return critic_loss.item(), metrics
     
     def update_policy(self, batch: Tuple, step: int) -> Tuple[float, Dict]:
-        """Update policy with contraction regularization and entropy bonus"""
+        """Update policy with contraction regularization, entropy bonus, and safety constraints"""
         states, _, _, _, _, _, weights = batch
         
         states_t = torch.FloatTensor(states).to(self.device)
@@ -1171,8 +1611,16 @@ class RobustContractionDynamicsAgent:
             delta_energy = energy_curr - energy_next
             contraction_bonus = torch.tanh(delta_energy / 5.0).mean()
         
+        # Safety penalty
+        safety_penalty = torch.tensor(0.0, device=self.device)
+        if self.config.USE_SAFETY_CONSTRAINTS:
+            safety_margin = self.compute_safety_margin(states_t)
+            safety_penalty = F.relu(
+                self.config.SAFETY_MARGIN_THRESHOLD - safety_margin
+            ).mean() * 0.1
+        
         # Entropy bonus for exploration
-        entropy_bonus = -0.2 * log_probs.mean()  # Encourage exploration
+        entropy_bonus = -0.2 * log_probs.mean()
         
         # Value loss (maximize Q)
         value_loss = -q_values.mean()
@@ -1189,7 +1637,8 @@ class RobustContractionDynamicsAgent:
             self.beta * contraction_bonus +
             entropy_bonus +
             velocity_penalty +
-            action_penalty
+            action_penalty +
+            safety_penalty
         )
         
         # Weight the loss
@@ -1211,6 +1660,7 @@ class RobustContractionDynamicsAgent:
             'value_loss': value_loss.item(),
             'contraction_bonus': contraction_bonus.item(),
             'entropy_bonus': entropy_bonus.item(),
+            'safety_penalty': safety_penalty.item(),
             'velocity_penalty': velocity_penalty.item(),
             'action_penalty': action_penalty.item(),
             'beta': self.beta,
@@ -1238,6 +1688,10 @@ class RobustContractionDynamicsAgent:
         self.metrics['metric_losses'].append(metric_loss)
         self.metrics['energies'].append(metric_metrics['energy_curr'])
         self.metrics['grad_norms']['metric'].append(metric_metrics['grad_norm'])
+        if 'geodesic_loss' in metric_metrics:
+            self.metrics['geodesic_losses'].append(metric_metrics['geodesic_loss'])
+        if 'safety_margin' in metric_metrics:
+            self.metrics['safety_margins'].append(metric_metrics['safety_margin'])
         
         # Update critic
         critic_loss, critic_metrics = self.update_critic(batch, step)
@@ -1263,22 +1717,38 @@ class RobustContractionDynamicsAgent:
         }
     
     def train_episode(self, env: gym.Env, episode_num: int) -> Dict:
-        """Execute one training episode with enhanced exploration"""
+        """Execute one training episode with enhanced exploration and curriculum"""
         state, _ = env.reset()
         self.exploration.reset()
+        
+        # Get curriculum parameters
+        curriculum_params = self.curriculum.get_parameters(episode_num)
         
         episode_reward = 0
         episode_steps = 0
         episode_transitions = []
+        episode_safety_margins = []
         
         for step in range(self.config.MAX_EPISODE_LENGTH):
-            # Select action with exploration
-            use_exploration = (episode_num < self.config.TOTAL_EPISODES * 0.8)  # Phase out exploration
-            action = self.select_action(state, deterministic=False, use_exploration=use_exploration)
+            # Select action with exploration and curriculum scaling
+            use_exploration = (episode_num < self.config.TOTAL_EPISODES * 0.8)
+            action = self.select_action(
+                state, 
+                deterministic=False, 
+                use_exploration=use_exploration,
+                curriculum_scale=curriculum_params['noise_scale']
+            )
             
             # Environment step
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
+            
+            # Compute safety margin if enabled
+            if self.config.USE_SAFETY_CONSTRAINTS:
+                with torch.no_grad():
+                    state_t = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+                    safety_margin = self.compute_safety_margin(state_t)
+                    episode_safety_margins.append(safety_margin.item())
             
             # Store transition
             episode_transitions.append((state.copy(), action, reward, next_state.copy(), done))
@@ -1302,6 +1772,15 @@ class RobustContractionDynamicsAgent:
         # Update exploration strategy
         self.exploration.update(episode_reward, episode_num)
         
+        # Update meta-learning controller
+        if self.metrics['energies']:
+            avg_energy = np.mean(self.metrics['energies'][-100:]) if len(self.metrics['energies']) >= 100 else np.mean(self.metrics['energies'])
+            self.meta_controller.update(episode_reward, avg_energy)
+            
+            # Update contraction rate based on meta-learning
+            self.contraction_alpha = self.meta_controller.suggest_contraction_rate()
+            self.contraction_alpha_history.append(self.contraction_alpha)
+        
         # Perform multiple training steps
         training_metrics = []
         if len(self.replay_buffer) > self.config.LEARNING_START:
@@ -1312,16 +1791,23 @@ class RobustContractionDynamicsAgent:
                 if metrics:
                     training_metrics.append(metrics)
         
-        # Adapt beta based on performance
+        # Adapt beta based on performance and curriculum
         if episode_num > 0 and self.metrics['episode_rewards']:
             last_reward = self.metrics['episode_rewards'][-1]
             reward_improved = episode_reward > last_reward
             self.adapt_beta(reward_improved)
         
+        # Apply curriculum beta
+        self.beta = curriculum_params['beta']
+        
         # Store episode metrics
         self.metrics['episode_rewards'].append(episode_reward)
         self.metrics['betas'].append(self.beta)
         self.metrics['exploration_rates'].append(self.exploration.exploration_rate)
+        self.metrics['curriculum_stages'].append(self.curriculum.current_stage)
+        
+        if episode_safety_margins:
+            self.metrics['safety_margins'].append(np.mean(episode_safety_margins))
         
         # Aggregate training metrics
         agg_metrics = {}
@@ -1335,6 +1821,8 @@ class RobustContractionDynamicsAgent:
             'episode': episode_num,
             'reward': episode_reward,
             'steps': episode_steps,
+            'curriculum_stage': self.curriculum.current_stage,
+            'contraction_alpha': self.contraction_alpha,
             **agg_metrics
         }
     
@@ -1364,14 +1852,15 @@ class RobustContractionDynamicsAgent:
         return avg_reward
     
     def train(self, env: gym.Env, eval_env: gym.Env = None) -> Dict:
-        """Main training loop with evaluation"""
+        """Main training loop with evaluation and curriculum learning"""
         if eval_env is None:
             eval_env = gym.make(self.config.ENV_NAME)
         
-        print(f"\nStarting robust CDM training for {self.config.TOTAL_EPISODES} episodes...")
-        print("=" * 100)
-        print(f"{'Episode':>8} {'Reward':>10} {'Eval':>10} {'β':>6} {'Expl':>6} {'Dyn Loss':>9} {'Metric Loss':>11} {'Critic Loss':>11}")
-        print("=" * 100)
+        print(f"\nStarting enhanced CDM training for {self.config.TOTAL_EPISODES} episodes...")
+        print("Features: Curriculum Learning + Meta-Learning + Attention Metrics + Safety Constraints")
+        print("=" * 120)
+        print(f"{'Episode':>8} {'Reward':>10} {'Eval':>10} {'β':>6} {'α':>6} {'Stage':>6} {'Dyn Loss':>9} {'Metric Loss':>11} {'Critic Loss':>11}")
+        print("=" * 120)
         
         best_eval_reward = -float('inf')
         patience_counter = 0
@@ -1403,8 +1892,10 @@ class RobustContractionDynamicsAgent:
             # Log progress
             if episode % self.config.LOG_INTERVAL == 0 or episode == self.config.TOTAL_EPISODES - 1:
                 eval_str = f"{eval_reward:10.1f}" if eval_reward is not None else "      N/A"
+                stage_names = ["stability", "perf", "tuning"]
+                stage_name = stage_names[min(episode_metrics['curriculum_stage'], len(stage_names)-1)]
                 print(f"{episode:8d} {episode_metrics['reward']:10.1f} {eval_str} "
-                      f"{self.beta:6.2f} {self.exploration.exploration_rate:6.2f} "
+                      f"{self.beta:6.2f} {self.contraction_alpha:6.2f} {stage_name:>6} "
                       f"{episode_metrics.get('dynamics_loss', 0):9.4f} "
                       f"{episode_metrics.get('metric_loss', 0):11.4f} "
                       f"{episode_metrics.get('critic_loss', 0):11.4f}")
@@ -1457,6 +1948,8 @@ class RobustContractionDynamicsAgent:
             if isinstance(v, list):
                 # Convert any tensors to lists
                 serializable_metrics[k] = [x.item() if torch.is_tensor(x) else x for x in v]
+            elif isinstance(v, defaultdict):
+                serializable_metrics[k] = dict(v)
             else:
                 serializable_metrics[k] = v
         
@@ -1468,223 +1961,245 @@ class RobustContractionDynamicsAgent:
             json.dump(serializable_metrics, f, indent=2, default=str)
     
     def plot_training_results(self):
-        """Plot comprehensive training results with robust error handling"""
+        """Plot comprehensive training results with enhanced visualization"""
         try:
-            # Create figure with subplots
-            fig, axes = plt.subplots(3, 3, figsize=(18, 15))
+            # Create figure with subplots for enhanced metrics
+            fig = plt.figure(figsize=(24, 20))
             
-            # Flatten axes for easier iteration
-            ax_flat = axes.flatten()
+            # Create grid for subplots
+            gs = fig.add_gridspec(4, 4, hspace=0.3, wspace=0.3)
             
-            # Episode indices for training rewards
-            if self.metrics.get('episode_rewards'):
-                episodes = range(len(self.metrics['episode_rewards']))
-                
-                # 1. Training and Evaluation Rewards - FIXED
-                ax = axes[0, 0]
-                ax.plot(episodes, self.metrics['episode_rewards'], 'b-', alpha=0.7, label='Training')
-                
-                # Fix eval plotting with proper alignment
-                if self.metrics.get('eval_rewards') and len(self.metrics['eval_rewards']) > 0:
-                    # Ensure eval data aligns with eval intervals
-                    eval_x = np.arange(0, len(episodes), self.config.EVAL_INTERVAL)
-                    # Trim eval_x to match eval_rewards length
-                    eval_x = eval_x[:len(self.metrics['eval_rewards'])]
-                    # Ensure they have same length
-                    min_len = min(len(eval_x), len(self.metrics['eval_rewards']))
-                    if min_len > 0:
-                        ax.plot(eval_x[:min_len], self.metrics['eval_rewards'][:min_len], 
-                            'r-', alpha=0.9, label='Evaluation', linewidth=2)
-                
+            # Episode indices
+            episodes = range(len(self.metrics['episode_rewards']))
+            
+            # 1. Training and Evaluation Rewards
+            ax = fig.add_subplot(gs[0, 0])
+            ax.plot(episodes, self.metrics['episode_rewards'], 'b-', alpha=0.7, label='Training')
+            if self.metrics.get('eval_rewards') and len(self.metrics['eval_rewards']) > 0:
+                eval_x = np.arange(0, len(episodes), self.config.EVAL_INTERVAL)
+                eval_x = eval_x[:len(self.metrics['eval_rewards'])]
+                min_len = min(len(eval_x), len(self.metrics['eval_rewards']))
+                if min_len > 0:
+                    ax.plot(eval_x[:min_len], self.metrics['eval_rewards'][:min_len], 
+                           'r-', alpha=0.9, label='Evaluation', linewidth=2)
+            ax.set_xlabel('Episode')
+            ax.set_ylabel('Reward')
+            ax.set_title('Training Progress')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            
+            # 2. Curriculum Stages
+            ax = fig.add_subplot(gs[0, 1])
+            if self.metrics.get('curriculum_stages'):
+                ax.plot(episodes, self.metrics['curriculum_stages'], 'g-', alpha=0.7)
                 ax.set_xlabel('Episode')
-                ax.set_ylabel('Reward')
-                ax.set_title('Training Progress')
+                ax.set_ylabel('Curriculum Stage')
+                ax.set_title('Curriculum Learning Progress')
+                ax.set_yticks([0, 1, 2])
+                ax.set_yticklabels(['Stability', 'Performance', 'Fine-tuning'])
+                ax.grid(True, alpha=0.3)
+            
+            # 3. Beta and Alpha Adaptation
+            ax = fig.add_subplot(gs[0, 2])
+            if self.metrics.get('betas') and len(self.metrics['betas']) > 0:
+                ax.plot(episodes[:len(self.metrics['betas'])], self.metrics['betas'], 
+                       'r-', alpha=0.7, label='β (Stability)')
+            if self.contraction_alpha_history:
+                ax.plot(episodes[:len(self.contraction_alpha_history)], 
+                       self.contraction_alpha_history, 
+                       'b-', alpha=0.7, label='α (Contraction)')
+            ax.set_xlabel('Episode')
+            ax.set_ylabel('Parameter Value')
+            ax.set_title('Adaptive Parameters')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            
+            # 4. Safety Margins
+            ax = fig.add_subplot(gs[0, 3])
+            if self.metrics.get('safety_margins') and len(self.metrics['safety_margins']) > 0:
+                safety_episodes = episodes[:len(self.metrics['safety_margins'])]
+                ax.plot(safety_episodes, self.metrics['safety_margins'], 'm-', alpha=0.7)
+                ax.axhline(y=self.config.SAFETY_MARGIN_THRESHOLD, color='r', 
+                          linestyle='--', label='Threshold')
+                ax.set_xlabel('Episode')
+                ax.set_ylabel('Safety Margin')
+                ax.set_title('Safety Metrics')
                 ax.legend()
                 ax.grid(True, alpha=0.3)
             
-            # 2. Loss Curves - FIXED
-            ax = axes[0, 1]
-            loss_data_exists = False
-            
+            # 5. Loss Curves
+            ax = fig.add_subplot(gs[1, :2])
             if self.metrics.get('dynamics_losses') and len(self.metrics['dynamics_losses']) > 0:
                 loss_steps = range(len(self.metrics['dynamics_losses']))
                 ax.plot(loss_steps, self.metrics['dynamics_losses'], 'b-', label='Dynamics', alpha=0.7)
-                loss_data_exists = True
-                
             if self.metrics.get('metric_losses') and len(self.metrics['metric_losses']) > 0:
-                min_len = min(len(loss_steps), len(self.metrics['metric_losses'])) if 'loss_steps' in locals() else len(self.metrics['metric_losses'])
-                if min_len > 0:
-                    ax.plot(range(min_len), self.metrics['metric_losses'][:min_len], 
-                        'g-', label='Metric', alpha=0.7)
-                    loss_data_exists = True
-                    
+                ax.plot(range(len(self.metrics['metric_losses'])), 
+                       self.metrics['metric_losses'], 'g-', label='Metric', alpha=0.7)
             if self.metrics.get('critic_losses') and len(self.metrics['critic_losses']) > 0:
-                min_len = min(len(loss_steps), len(self.metrics['critic_losses'])) if 'loss_steps' in locals() else len(self.metrics['critic_losses'])
-                if min_len > 0:
-                    ax.plot(range(min_len), self.metrics['critic_losses'][:min_len], 
-                        'r-', label='Critic', alpha=0.7)
-                    loss_data_exists = True
-                    
+                ax.plot(range(len(self.metrics['critic_losses'])), 
+                       self.metrics['critic_losses'], 'r-', label='Critic', alpha=0.7)
             if self.metrics.get('actor_losses') and len(self.metrics['actor_losses']) > 0:
-                min_len = min(len(loss_steps), len(self.metrics['actor_losses'])) if 'loss_steps' in locals() else len(self.metrics['actor_losses'])
-                if min_len > 0:
-                    ax.plot(range(min_len), self.metrics['actor_losses'][:min_len], 
-                        'm-', label='Actor', alpha=0.7)
-                    loss_data_exists = True
+                ax.plot(range(len(self.metrics['actor_losses'])), 
+                       self.metrics['actor_losses'], 'm-', label='Actor', alpha=0.7)
+            ax.set_xlabel('Training Step')
+            ax.set_ylabel('Loss')
+            ax.set_title('Training Losses')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            ax.set_yscale('log')
             
-            if loss_data_exists:
-                ax.set_xlabel('Training Step')
-                ax.set_ylabel('Loss')
-                ax.set_title('Training Losses')
-                ax.legend()
-                ax.grid(True, alpha=0.3)
-                ax.set_yscale('log')
-            else:
-                ax.text(0.5, 0.5, 'No loss data available', 
-                    ha='center', va='center', transform=ax.transAxes)
-                ax.set_title('Training Losses')
+            # 6. Energy and Geodesic Losses
+            ax = fig.add_subplot(gs[1, 2:])
+            if self.metrics.get('energies') and len(self.metrics['energies']) > 0:
+                ax.plot(range(len(self.metrics['energies'])), self.metrics['energies'], 
+                       'purple', alpha=0.7, label='Energy')
+            if self.metrics.get('geodesic_losses') and len(self.metrics['geodesic_losses']) > 0:
+                ax_twin = ax.twinx()
+                ax_twin.plot(range(len(self.metrics['geodesic_losses'])), 
+                            self.metrics['geodesic_losses'], 'orange', alpha=0.7, label='Geodesic')
+                ax_twin.set_ylabel('Geodesic Loss', color='orange')
+                ax_twin.tick_params(axis='y', labelcolor='orange')
+            ax.set_xlabel('Training Step')
+            ax.set_ylabel('Energy', color='purple')
+            ax.set_title('Metric Energy & Geodesic Regularization')
+            ax.grid(True, alpha=0.3)
             
-            # 3. Beta Adaptation - FIXED
-            ax = axes[0, 2]
-            if self.metrics.get('betas') and len(self.metrics['betas']) > 0:
-                # Ensure x and y have same length
-                x_range = range(len(self.metrics['betas']))
-                ax.plot(x_range, self.metrics['betas'], 'r-', alpha=0.7)
-                ax.set_xlabel('Episode' if len(x_range) <= len(episodes) else 'Training Step')
-                ax.set_ylabel('β')
-                ax.set_title('Stability Weight Adaptation')
-                ax.grid(True, alpha=0.3)
-            else:
-                ax.text(0.5, 0.5, 'No beta data available', 
-                    ha='center', va='center', transform=ax.transAxes)
-                ax.set_title('Stability Weight Adaptation')
-            
-            # 4. Exploration Rate - FIXED
-            ax = axes[1, 0]
+            # 7. Exploration Rate
+            ax = fig.add_subplot(gs[2, 0])
             if self.metrics.get('exploration_rates') and len(self.metrics['exploration_rates']) > 0:
-                # Ensure x and y have same length
-                x_range = range(len(self.metrics['exploration_rates']))
-                ax.plot(x_range, self.metrics['exploration_rates'], 'g-', alpha=0.7)
-                ax.set_xlabel('Episode' if len(x_range) <= len(episodes) else 'Training Step')
+                ax.plot(episodes[:len(self.metrics['exploration_rates'])], 
+                       self.metrics['exploration_rates'], 'g-', alpha=0.7)
+                ax.set_xlabel('Episode')
                 ax.set_ylabel('Exploration Rate')
                 ax.set_title('Exploration Schedule')
                 ax.grid(True, alpha=0.3)
-            else:
-                ax.text(0.5, 0.5, 'No exploration data available', 
-                    ha='center', va='center', transform=ax.transAxes)
-                ax.set_title('Exploration Schedule')
             
-            # 5. Energy Levels - FIXED
-            ax = axes[1, 1]
-            if self.metrics.get('energies') and len(self.metrics['energies']) > 0:
-                # Ensure x and y have same length
-                x_range = range(len(self.metrics['energies']))
-                ax.plot(x_range, self.metrics['energies'], 'purple', alpha=0.7)
-                ax.set_xlabel('Training Step')
-                ax.set_ylabel('Energy')
-                ax.set_title('Metric Energy')
-                ax.grid(True, alpha=0.3)
-            else:
-                ax.text(0.5, 0.5, 'No energy data available', 
-                    ha='center', va='center', transform=ax.transAxes)
-                ax.set_title('Metric Energy')
-            
-            # 6. Reward Distribution - FIXED
-            ax = axes[1, 2]
+            # 8. Reward Distribution
+            ax = fig.add_subplot(gs[2, 1])
             if self.metrics.get('episode_rewards') and len(self.metrics['episode_rewards']) > 0:
                 ax.hist(self.metrics['episode_rewards'], bins=30, alpha=0.7, 
-                    color='blue', edgecolor='black')
+                       color='blue', edgecolor='black')
                 ax.set_xlabel('Reward')
                 ax.set_ylabel('Frequency')
                 ax.set_title('Reward Distribution')
                 ax.grid(True, alpha=0.3)
-            else:
-                ax.text(0.5, 0.5, 'No reward data available', 
-                    ha='center', va='center', transform=ax.transAxes)
-                ax.set_title('Reward Distribution')
             
-            # 7. Moving Average Rewards - FIXED
-            ax = axes[2, 0]
+            # 9. Moving Average
+            ax = fig.add_subplot(gs[2, 2])
             if self.metrics.get('episode_rewards') and len(self.metrics['episode_rewards']) >= 20:
                 window = min(20, len(self.metrics['episode_rewards']))
                 moving_avg = np.convolve(self.metrics['episode_rewards'], 
                                         np.ones(window)/window, mode='valid')
-                # Ensure x and y have same length
-                x_range = range(window-1, len(self.metrics['episode_rewards']))
-                min_len = min(len(x_range), len(moving_avg))
-                if min_len > 0:
-                    ax.plot(x_range[:min_len], moving_avg[:min_len], 'orange', linewidth=2)
-                    ax.set_xlabel('Episode')
-                    ax.set_ylabel(f'Reward ({window}-ep MA)')
-                    ax.set_title('Moving Average Performance')
-                    ax.grid(True, alpha=0.3)
-            else:
-                ax.text(0.5, 0.5, 'Insufficient data for moving average', 
-                    ha='center', va='center', transform=ax.transAxes)
+                ax.plot(range(window-1, len(self.metrics['episode_rewards'])), 
+                       moving_avg, 'orange', linewidth=2)
+                ax.set_xlabel('Episode')
+                ax.set_ylabel(f'Reward ({window}-ep MA)')
                 ax.set_title('Moving Average Performance')
+                ax.grid(True, alpha=0.3)
             
-            # 8. Success Rate - FIXED
-            ax = axes[2, 1]
+            # 10. Success Rate
+            ax = fig.add_subplot(gs[2, 3])
             if self.metrics.get('episode_rewards') and len(self.metrics['episode_rewards']) >= 20:
                 window = min(20, len(self.metrics['episode_rewards']))
                 success_rates = []
-                
-                # Calculate success rates
                 for i in range(len(self.metrics['episode_rewards']) - window + 1):
                     window_rewards = self.metrics['episode_rewards'][i:i+window]
                     successes = sum(1 for r in window_rewards if r > -500)
                     success_rates.append(successes / window * 100)
-                
-                # Ensure x and y have same length
                 if success_rates:
-                    x_range = range(window-1, len(self.metrics['episode_rewards']))
-                    min_len = min(len(x_range), len(success_rates))
-                    if min_len > 0:
-                        ax.plot(x_range[:min_len], success_rates[:min_len], 'g-', linewidth=2)
-                        ax.set_xlabel('Episode')
-                        ax.set_ylabel('Success Rate (%)')
-                        ax.set_title(f'Success Rate (> -500)')
-                        ax.grid(True, alpha=0.3)
-                        ax.set_ylim([0, 100])
-            else:
-                ax.text(0.5, 0.5, 'Insufficient data for success rate', 
-                    ha='center', va='center', transform=ax.transAxes)
-                ax.set_title('Success Rate')
+                    ax.plot(range(window-1, len(self.metrics['episode_rewards'])), 
+                           success_rates, 'g-', linewidth=2)
+                    ax.set_xlabel('Episode')
+                    ax.set_ylabel('Success Rate (%)')
+                    ax.set_title(f'Success Rate (> -500)')
+                    ax.grid(True, alpha=0.3)
+                    ax.set_ylim([0, 100])
             
-            # 9. Beta vs Reward - FIXED
-            ax = axes[2, 2]
+            # 11. Beta vs Reward
+            ax = fig.add_subplot(gs[3, 0])
             if (self.metrics.get('betas') and self.metrics.get('episode_rewards') and
                 len(self.metrics['betas']) > 0 and len(self.metrics['episode_rewards']) > 0):
-                # Ensure same length
                 min_len = min(len(self.metrics['betas']), len(self.metrics['episode_rewards']))
                 if min_len > 0:
                     scatter = ax.scatter(self.metrics['betas'][:min_len], 
-                                    self.metrics['episode_rewards'][:min_len],
-                                    c=range(min_len),
-                                    cmap='viridis', alpha=0.6, s=20)
+                                       self.metrics['episode_rewards'][:min_len],
+                                       c=range(min_len), cmap='viridis', alpha=0.6, s=20)
                     ax.set_xlabel('β (Stability Weight)')
                     ax.set_ylabel('Reward')
                     ax.set_title('Stability-Performance Tradeoff')
                     ax.grid(True, alpha=0.3)
                     plt.colorbar(scatter, ax=ax, label='Episode')
-            else:
-                ax.text(0.5, 0.5, 'Insufficient data for scatter plot', 
-                    ha='center', va='center', transform=ax.transAxes)
-                ax.set_title('Stability-Performance Tradeoff')
             
-            # Hide any unused axes
-            for i in range(9):
-                if not axes.flatten()[i].has_data():
-                    axes.flatten()[i].axis('off')
+            # 12. Contraction Alpha vs Reward
+            ax = fig.add_subplot(gs[3, 1])
+            if (self.contraction_alpha_history and self.metrics.get('episode_rewards') and
+                len(self.contraction_alpha_history) > 0 and len(self.metrics['episode_rewards']) > 0):
+                min_len = min(len(self.contraction_alpha_history), len(self.metrics['episode_rewards']))
+                if min_len > 0:
+                    scatter = ax.scatter(self.contraction_alpha_history[:min_len], 
+                                       self.metrics['episode_rewards'][:min_len],
+                                       c=range(min_len), cmap='plasma', alpha=0.6, s=20)
+                    ax.set_xlabel('α (Contraction Rate)')
+                    ax.set_ylabel('Reward')
+                    ax.set_title('Contraction-Performance Tradeoff')
+                    ax.grid(True, alpha=0.3)
+                    plt.colorbar(scatter, ax=ax, label='Episode')
             
-            plt.suptitle(f'Robust CDM: Training Results (Final Reward: {self.metrics.get("episode_rewards", [-1])[-1]:.1f})', 
-                        fontsize=16, fontweight='bold')
-            plt.tight_layout()
+            # 13. Gradient Norms
+            ax = fig.add_subplot(gs[3, 2])
+            if self.metrics.get('grad_norms'):
+                for key in ['dynamics', 'metric', 'critic', 'policy']:
+                    if key in self.metrics['grad_norms'] and self.metrics['grad_norms'][key]:
+                        ax.plot(range(len(self.metrics['grad_norms'][key])), 
+                               self.metrics['grad_norms'][key], alpha=0.7, label=key.capitalize())
+                ax.set_xlabel('Training Step')
+                ax.set_ylabel('Gradient Norm')
+                ax.set_title('Gradient Norms Over Time')
+                ax.legend()
+                ax.grid(True, alpha=0.3)
+                ax.set_yscale('log')
+            
+            # 14. Summary Statistics
+            ax = fig.add_subplot(gs[3, 3])
+            ax.axis('off')
+            
+            # Create summary text
+            if self.metrics.get('episode_rewards') and len(self.metrics['episode_rewards']) > 0:
+                rewards = self.metrics['episode_rewards']
+                summary_text = (
+                    f"Training Summary\n"
+                    f"{'='*30}\n"
+                    f"Episodes: {len(rewards)}\n"
+                    f"Final Reward: {rewards[-1]:.1f}\n"
+                    f"Best Reward: {max(rewards):.1f}\n"
+                    f"Mean Reward: {np.mean(rewards):.1f}\n"
+                    f"Std Reward: {np.std(rewards):.1f}\n\n"
+                    f"Best Eval: {max(self.metrics.get('eval_rewards', [0])):.1f}\n"
+                    f"Final β: {self.beta:.3f}\n"
+                    f"Final α: {self.contraction_alpha:.3f}"
+                )
+                
+                # Add early episode stats
+                if len(rewards) >= 50:
+                    early_mean = np.mean(rewards[:50])
+                    late_mean = np.mean(rewards[-50:])
+                    improvement = ((late_mean - early_mean) / abs(early_mean)) * 100
+                    summary_text += f"\n\nImprovement: {improvement:.1f}%"
+                
+                ax.text(0.1, 0.5, summary_text, transform=ax.transAxes,
+                       fontsize=10, verticalalignment='center',
+                       fontfamily='monospace',
+                       bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+            
+            plt.suptitle(f'Enhanced CDM: Training Results\n'
+                        f'(Features: Curriculum + Meta-Learning + Attention + Safety)\n'
+                        f'Final Reward: {self.metrics.get("episode_rewards", [-1])[-1]:.1f}', 
+                        fontsize=14, fontweight='bold')
             
             # Save the plot
             save_path = Path(self.save_dir) / "training_results.png"
             plt.savefig(save_path, dpi=150, bbox_inches='tight', facecolor='white')
-            print(f"✓ Training results saved to {save_path}")
+            print(f"✓ Enhanced training results saved to {save_path}")
             
             # Show plot if enabled
             if self.config.PLOT_RESULTS:
@@ -1699,10 +2214,10 @@ class RobustContractionDynamicsAgent:
             
             # Create simple fallback plot
             try:
-                fig, ax = plt.subplots(figsize=(10, 6))
+                fig, ax = plt.subplots(figsize=(12, 8))
                 if self.metrics.get('episode_rewards'):
                     ax.plot(range(len(self.metrics['episode_rewards'])), 
-                        self.metrics['episode_rewards'])
+                           self.metrics['episode_rewards'])
                     ax.set_xlabel('Episode')
                     ax.set_ylabel('Reward')
                     ax.set_title('Basic Training Progress')
@@ -1718,69 +2233,82 @@ class RobustContractionDynamicsAgent:
                         plt.close()
             except:
                 print("✗ Could not create fallback plot either")
+
 # ============================
 # TESTING AND VALIDATION
 # ============================
 
-def run_tests():
-    """Run comprehensive tests on the implementation"""
-    print("Running comprehensive tests...")
+def run_enhanced_tests():
+    """Run comprehensive tests on the enhanced implementation"""
+    print("Running enhanced comprehensive tests...")
     
-    # Test 1: Configuration validation
+    # Test 1: Configuration with enhanced features
     config = Config()
+    config.USE_CURRICULUM = True
+    config.USE_META_LEARNING = True
+    config.USE_ATTENTION_METRIC = True
+    config.USE_SAFETY_CONSTRAINTS = True
+    config.USE_GEODESIC_REGULARIZATION = True
+    
     config.save(Path("test_config.json"))
     loaded_config = Config.load(Path("test_config.json"))
-    # Compare configurations
     assert config.ENV_NAME == loaded_config.ENV_NAME, "Configuration save/load failed"
-    print("✓ Configuration test passed")
+    print("✓ Enhanced configuration test passed")
     
-    # Test 2: Network initialization
+    # Test 2: Network initialization with attention metric
     device = torch.device("cpu")
     
-    # Test dynamics ensemble
-    dynamics = DynamicsEnsemble(3, 1, 5, 64).to(device)
+    # Test attention-based metric
+    metric = AttentionBasedMetric(3, 64, num_heads=3).to(device)
     test_state = torch.randn(10, 3)
-    test_action = torch.randn(10, 1)
-    mean, unc = dynamics(test_state, test_action)
-    assert mean.shape == (10, 3), f"Dynamics output shape: {mean.shape}"
-    print("✓ Dynamics ensemble test passed")
-    
-    # Test policy network
-    policy = EnhancedPolicyNetwork(3, 1, 64).to(device)
-    dist = policy(test_state)
-    action = dist.sample()
-    assert action.shape == (10, 1), f"Policy output shape: {action.shape}"
-    print("✓ Policy network test passed")
-    
-    # Test critic network
-    critic = EnhancedValueNetwork(3, 64).to(device)
-    q1, q2 = critic(test_state)
-    assert q1.shape == (10, 1), f"Critic Q1 shape: {q1.shape}"
-    assert q2.shape == (10, 1), f"Critic Q2 shape: {q2.shape}"
-    print("✓ Critic network test passed")
-    
-    # Test metric network
-    metric = RobustContractionMetric(3, 64).to(device)
     M, L = metric(test_state)
-    assert M.shape == (10, 3, 3), f"Metric shape: {M.shape}"
-    assert L.shape == (10, 3, 3), f"Cholesky shape: {L.shape}"
-    print("✓ Metric network test passed")
+    assert M.shape == (10, 3, 3), f"Attention metric shape: {M.shape}"
+    print("✓ Attention-based metric test passed")
     
-    # Test Riemannian operations
-    energy, _ = EnhancedRiemannianOperations.compute_energy(test_state, metric)
-    assert energy.shape == (10,), f"Energy shape: {energy.shape}"
-    print("✓ Riemannian operations test passed")
+    # Test 3: Geodesic regularization
+    geodesic_loss = EnhancedRiemannianOperations.compute_geodesic_regularization(
+        test_state, metric
+    )
+    assert geodesic_loss.ndim == 0, "Geodesic loss should be scalar"
+    print("✓ Geodesic regularization test passed")
     
-    # Test replay buffer
-    buffer = PrioritizedReplayBuffer(100)
-    for i in range(50):
-        buffer.push(np.random.randn(3), np.random.randn(1), 
-                   np.random.randn(), np.random.randn(3), False)
-    batch = buffer.sample(32)
-    assert batch is not None, "Replay buffer sampling failed"
-    print("✓ Replay buffer test passed")
+    # Test 4: Safety margin computation
+    safety_margin = EnhancedRiemannianOperations.compute_safety_margin(
+        test_state, metric
+    )
+    assert safety_margin.shape == (10,), f"Safety margin shape: {safety_margin.shape}"
+    print("✓ Safety margin test passed")
     
-    print("\nAll tests passed successfully!")
+    # Test 5: Metric conditioning
+    M_conditioned = EnhancedRiemannianOperations.condition_metric(M)
+    assert M_conditioned.shape == M.shape, "Conditioned metric shape mismatch"
+    
+    # Check condition number
+    eigenvalues = torch.linalg.eigvalsh(M_conditioned)
+    condition_number = eigenvalues.max() / eigenvalues.min()
+    assert condition_number < 200, f"Condition number too high: {condition_number}"
+    print("✓ Metric conditioning test passed")
+    
+    # Test 6: Curriculum scheduler
+    curriculum = CurriculumScheduler(config)
+    params = curriculum.get_parameters(0)
+    assert 'beta' in params, "Curriculum missing beta"
+    assert 'exploration_scale' in params, "Curriculum missing exploration_scale"
+    print("✓ Curriculum scheduler test passed")
+    
+    # Test 7: Meta-learning controller
+    meta = MetaLearningController(config)
+    meta.update(-500, 1.0)
+    alpha = meta.suggest_contraction_rate()
+    assert 0 < alpha < 1, f"Invalid contraction rate: {alpha}"
+    print("✓ Meta-learning controller test passed")
+    
+    # Test 8: Full agent initialization
+    agent = EnhancedContractionDynamicsAgent(config)
+    assert agent.metric_net is not None, "Agent metric network not initialized"
+    print("✓ Full agent initialization test passed")
+    
+    print("\n✅ All enhanced tests passed successfully!")
     
     # Clean up
     if Path("test_config.json").exists():
@@ -1802,17 +2330,24 @@ def set_seed(seed: int):
         torch.backends.cudnn.benchmark = False
 
 def main():
-    """Main execution with robust training"""
-    print("=" * 100)
-    print("ROBUST CONTRACTION DYNAMICS MODEL - RIEMANNIAN METRIC LEARNING")
-    print("=" * 100)
+    """Main execution with enhanced training"""
+    print("=" * 120)
+    print("ENHANCED CONTRACTION DYNAMICS MODEL - RIEMANNIAN METRIC LEARNING")
+    print("=" * 120)
     print("Paper: 'Learning Contraction Metrics for Provably Stable Model-Based RL'")
     print("Author: Amir Hameed, Sirraya Labs")
-    print("=" * 100)
+    print("=" * 120)
+    print("\nEnhanced Features:")
+    print("  ✓ Curriculum Learning for progressive stability training")
+    print("  ✓ Meta-Learning for adaptive hyperparameter tuning")
+    print("  ✓ Attention-Based Metric for state-dependent importance")
+    print("  ✓ Safety Constraints for bounded exploration")
+    print("  ✓ Geodesic Regularization for smooth metric learning")
+    print("=" * 120)
     
     # Run tests first
     try:
-        run_tests()
+        run_enhanced_tests()
     except Exception as e:
         print(f"Tests failed: {e}")
         import traceback
@@ -1822,18 +2357,25 @@ def main():
     # Set seed for reproducibility
     set_seed(Config.SEED)
     
-    # Create agent with robust configuration
+    # Create enhanced configuration
     config = Config()
-    agent = RobustContractionDynamicsAgent(config)
+    config.USE_CURRICULUM = True
+    config.USE_META_LEARNING = True
+    config.USE_ATTENTION_METRIC = True
+    config.USE_SAFETY_CONSTRAINTS = True
+    config.USE_GEODESIC_REGULARIZATION = True
+    
+    # Create agent with enhanced configuration
+    agent = EnhancedContractionDynamicsAgent(config)
     
     # Create environments
     train_env = gym.make(config.ENV_NAME)
     eval_env = gym.make(config.ENV_NAME)
     
     # Train the agent
-    print("\n" + "=" * 100)
-    print("PHASE 1: ROBUST TRAINING")
-    print("=" * 100)
+    print("\n" + "=" * 120)
+    print("PHASE 1: ENHANCED TRAINING WITH CURRICULUM AND META-LEARNING")
+    print("=" * 120)
     
     try:
         start_time = time.time()
@@ -1857,15 +2399,15 @@ def main():
         train_env.close()
         eval_env.close()
     
-    print("\n" + "=" * 100)
+    print("\n" + "=" * 120)
     print("EXPERIMENT COMPLETED")
-    print("=" * 100)
+    print("=" * 120)
     print(f"\nOutput files created in: {config.SAVE_DIR}")
-    print("  - config.json (configuration)")
+    print("  - config.json (enhanced configuration)")
     print("  - best_*.pth (best performing models)")
     print("  - final_*.pth (final trained models)")
     print("  - training_metrics.pkl/.json (comprehensive metrics)")
-    print("  - training_results.png (detailed plots)")
+    print("  - training_results.png (enhanced visualization)")
 
 if __name__ == "__main__":
     main()
